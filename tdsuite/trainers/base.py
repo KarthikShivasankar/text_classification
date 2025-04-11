@@ -16,6 +16,11 @@ from sklearn.metrics import (
     classification_report,
     roc_auc_score,
     average_precision_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    matthews_corrcoef,
+    accuracy_score,
 )
 from scipy.special import softmax
 import scipy.stats
@@ -125,9 +130,6 @@ class BaseTrainer:
         Returns:
             Training results
         """
-        # Convert TrainingConfig to TrainingArguments
-        from transformers import TrainingArguments
-        
         # Get the list of valid arguments for TrainingArguments
         valid_args = TrainingArguments.__init__.__code__.co_varnames
         
@@ -144,6 +146,10 @@ class BaseTrainer:
         # Add batch_eval_metrics attribute
         filtered_args["batch_eval_metrics"] = False
         
+        # Set evaluation_strategy to "no" if no eval_dataset is provided
+        if eval_dataset is None and filtered_args.get("evaluation_strategy") != "no":
+            filtered_args["evaluation_strategy"] = "no"
+        
         # Create TrainingArguments object with only valid arguments
         training_args = TrainingArguments(**filtered_args)
         
@@ -159,10 +165,25 @@ class BaseTrainer:
 
         # Start emissions tracking
         if self.track_emissions:
+            # Make sure output directory exists
+            emissions_dir = os.path.join(self.output_dir, "emissions")
+            os.makedirs(emissions_dir, exist_ok=True)
+            
+            # Configure tracker
+            self.tracker = EmissionsTracker(
+                output_dir=emissions_dir,
+                project_name="training",
+                output_file="training_emissions.csv"
+            )
+            
+            # Start tracking
             self.tracker.start()
+            print("🌱 Carbon emissions tracking started for training")
 
         # Train the model
+        print(f"🚀 Starting training for {training_args.num_train_epochs} epochs")
         train_result = trainer.train()
+        print("✅ Training completed!")
 
         # Save training metrics
         train_metrics = {
@@ -174,10 +195,12 @@ class BaseTrainer:
         }
         
         # Save the model
+        print(f"💾 Saving model to {self.output_dir}")
         trainer.save_model(self.output_dir)
 
         # Evaluate the model
         if eval_dataset is not None:
+            print("📊 Evaluating model on validation set")
             eval_metrics = trainer.evaluate()
             
             # Combine training and evaluation metrics
@@ -187,26 +210,77 @@ class BaseTrainer:
             }
 
             # Save all metrics
-            with open(os.path.join(self.output_dir, "metrics.json"), "w") as f:
+            metrics_file = os.path.join(self.output_dir, "metrics.json")
+            with open(metrics_file, "w") as f:
                 json.dump(all_metrics, f, indent=4)
+            print(f"📊 Metrics saved to {metrics_file}")
 
         # Stop emissions tracking
         if self.track_emissions:
-            emissions_data = self.tracker.stop()
-
-            # Save emissions data
-            tracker_path = os.path.join(self.output_dir, "carbon_emissions.json")
-            if hasattr(emissions_data, 'toJSON'):
-                emissions_json = json.loads(emissions_data.toJSON())
-            else:
-                # If emissions_data is a float or other type, create a simple JSON object
-                emissions_json = {
-                    "emissions": float(emissions_data),
-                    "unit": "kgCO2e",
-                    "timestamp": datetime.datetime.now().isoformat()
-                }
-            with open(tracker_path, "w") as f:
-                json.dump(emissions_json, f, indent=4)
+            try:
+                emissions_data = self.tracker.stop()
+                
+                # Save emissions data
+                emissions_dir = os.path.join(self.output_dir, "emissions")
+                os.makedirs(emissions_dir, exist_ok=True)
+                tracker_path = os.path.join(emissions_dir, "training_emissions.json")
+                
+                if emissions_data is None:
+                    # Handle case where emissions data is None
+                    emissions_json = {
+                        "emissions": 0.0,
+                        "unit": "kgCO2e",
+                        "timestamp": datetime.datetime.now().isoformat(),
+                        "error": "No emissions data was recorded"
+                    }
+                    print("\n⚠️ Warning: No emissions data was recorded")
+                elif hasattr(emissions_data, 'toJSON'):
+                    try:
+                        emissions_json = json.loads(emissions_data.toJSON())
+                    except (TypeError, json.JSONDecodeError):
+                        # Handle invalid JSON
+                        emissions_json = {
+                            "emissions": 0.0,
+                            "unit": "kgCO2e",
+                            "timestamp": datetime.datetime.now().isoformat(),
+                            "error": "Invalid emissions data format"
+                        }
+                        print("\n⚠️ Warning: Invalid emissions data format")
+                else:
+                    # If emissions_data is a float or other type, create a simple JSON object
+                    try:
+                        emissions_value = float(emissions_data)
+                        emissions_json = {
+                            "emissions": emissions_value,
+                            "unit": "kgCO2e",
+                            "timestamp": datetime.datetime.now().isoformat()
+                        }
+                    except (TypeError, ValueError):
+                        # Handle case where emissions_data can't be converted to float
+                        emissions_json = {
+                            "emissions": 0.0,
+                            "unit": "kgCO2e",
+                            "timestamp": datetime.datetime.now().isoformat(),
+                            "error": "Emissions data couldn't be converted to float"
+                        }
+                        print("\n⚠️ Warning: Emissions data couldn't be converted to float")
+                
+                # Save the JSON file
+                with open(tracker_path, "w") as f:
+                    json.dump(emissions_json, f, indent=4)
+                
+                # Safely extract emissions value for display
+                emissions_value = emissions_json.get("emissions", 0.0)
+                if not isinstance(emissions_value, (int, float)):
+                    emissions_value = 0.0
+                
+                print(f"\n🌱 Carbon emissions: {emissions_value:.6f} kgCO2e")
+                print(f"🌱 Emissions data saved to {tracker_path}")
+            
+            except Exception as e:
+                # Catch any unexpected errors during emissions tracking
+                print(f"\n⚠️ Warning: Error in emissions tracking: {str(e)}")
+                # Ensure this doesn't break the training process
 
         # Clean up
         torch.cuda.empty_cache()
@@ -224,10 +298,24 @@ class BaseTrainer:
         Returns:
             Evaluation results
         """
-        # Initialize trainer
+        # Get a copy of training arguments with evaluation_strategy set to "no"
+        training_args_dict = self.training_args.to_dict()
+        # Set evaluation_strategy to "no" since we're only making predictions
+        training_args_dict["evaluation_strategy"] = "no"
+        # When evaluation_strategy is "no", we must set load_best_model_at_end to False
+        training_args_dict["load_best_model_at_end"] = False
+        # Also set save_strategy to "no" to match evaluation_strategy
+        training_args_dict["save_strategy"] = "no"
+        # Filter out any unexpected arguments
+        valid_args = TrainingArguments.__init__.__code__.co_varnames
+        filtered_args = {k: v for k, v in training_args_dict.items() if k in valid_args}
+        # Create new training arguments
+        eval_training_args = TrainingArguments(**filtered_args)
+
+        # Initialize trainer with adjusted training arguments
         trainer = WeightedLossTrainer(
             model=self.model,
-            args=self.training_args,
+            args=eval_training_args,
             compute_metrics=self.compute_metrics,
             class_weights=self.class_weights,
         )
@@ -307,61 +395,40 @@ class BaseTrainer:
         def compute_metrics(eval_pred):
             """
             Compute metrics for evaluation.
-
+            
             Args:
-                eval_pred: Evaluation predictions
-
+                eval_pred: Tuple of (predictions, labels)
+            
             Returns:
                 Dictionary of metrics
             """
-            predictions, labels = eval_pred
-            predictions = np.argmax(predictions, axis=1)
-
+            from sklearn.metrics import precision_score, recall_score, f1_score, matthews_corrcoef, roc_auc_score
+            
+            logits, labels = eval_pred
+            predictions = np.argmax(logits, axis=1)
+            
             # Compute metrics
             results = {}
-
+            results["accuracy"] = (predictions == labels).mean()
+            
+            # Binary classification metrics
+            results["precision"] = precision_score(labels, predictions, average='binary')
+            results["recall"] = recall_score(labels, predictions, average='binary')
+            results["f1"] = f1_score(labels, predictions, average='binary')
+            
+            # Add Matthews correlation coefficient
+            results["mcc"] = matthews_corrcoef(labels, predictions)
+            
+            # Add ROC AUC when appropriate
             if is_binary:
-                # Binary classification metrics
-                results["accuracy"] = (predictions == labels).mean()
-                results["roc_auc"] = roc_auc_score(labels, predictions)
-                results["average_precision"] = average_precision_score(labels, predictions)
-
-                # Classification report
-                report = classification_report(
-                    labels,
-                    predictions,
-                    target_names=[idx2cat[0], idx2cat[1]],
-                    output_dict=True,
-                )
-
-                # Add metrics from classification report
-                for metric_name, metric_value in report.items():
-                    if isinstance(metric_value, dict):
-                        for sub_metric, value in metric_value.items():
-                            results[f"{metric_name}_{sub_metric}"] = value
-                    else:
-                        results[metric_name] = metric_value
-
-            else:
-                # Multi-class classification metrics
-                results["accuracy"] = (predictions == labels).mean()
-
-                # Classification report
-                report = classification_report(
-                    labels,
-                    predictions,
-                    target_names=[idx2cat[i] for i in range(len(cat2idx))],
-                    output_dict=True,
-                )
-
-                # Add metrics from classification report
-                for metric_name, metric_value in report.items():
-                    if isinstance(metric_value, dict):
-                        for sub_metric, value in metric_value.items():
-                            results[f"{metric_name}_{sub_metric}"] = value
-                    else:
-                        results[metric_name] = metric_value
-
+                # Get probabilities for the positive class
+                probs = softmax(logits, axis=1)[:, 1]
+                try:
+                    results["roc_auc"] = roc_auc_score(labels, probs)
+                except ValueError:
+                    # In case there's only one class in the labels
+                    results["roc_auc"] = 0.0
+            
             return results
 
         return compute_metrics
@@ -378,15 +445,63 @@ class BaseTrainer:
             idx2cat: Mapping from indices to categories
             output_dir: Directory to save plots
         """
+        # Calculate overall metrics
+        from sklearn.metrics import matthews_corrcoef, roc_auc_score, accuracy_score, precision_score, recall_score, f1_score
+        
+        predictions = np.argmax(logits, axis=1)
+        
         # Convert logits to probabilities
         probs = softmax(logits, axis=1)[:, 1]
+        
+        # Calculate key metrics
+        accuracy = accuracy_score(labels, predictions)
+        precision = precision_score(labels, predictions, average='binary')
+        recall = recall_score(labels, predictions, average='binary')
+        f1 = f1_score(labels, predictions, average='binary')
+        mcc = matthews_corrcoef(labels, predictions)
+        try:
+            roc_auc = roc_auc_score(labels, probs)
+        except ValueError:
+            roc_auc = 0.0
+
+        # Save metrics to file
+        metrics = {
+            "accuracy": float(accuracy),
+            "precision": float(precision),
+            "recall": float(recall),
+            "f1": float(f1),
+            "mcc": float(mcc),
+            "roc_auc": float(roc_auc)
+        }
+        with open(os.path.join(output_dir, "binary_metrics.json"), "w") as f:
+            json.dump(metrics, f, indent=4)
+        
+        # Create a metrics summary plot
+        plt.figure(figsize=(10, 6))
+        metrics_data = [accuracy, precision, recall, f1, mcc, roc_auc]
+        metrics_names = ["Accuracy", "Precision", "Recall", "F1", "MCC", "ROC AUC"]
+        colors = ["blue", "green", "red", "purple", "orange", "brown"]
+        
+        bars = plt.bar(metrics_names, metrics_data, color=colors)
+        
+        # Add values on top of bars
+        for bar in bars:
+            height = bar.get_height()
+            plt.text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                    f'{height:.3f}', ha='center', va='bottom')
+        
+        plt.ylim(0, 1.1)
+        plt.ylabel("Score")
+        plt.title("Binary Classification Metrics")
+        plt.savefig(os.path.join(output_dir, "metrics_summary.png"))
+        plt.close()
 
         # Plot ROC curve
         fpr, tpr, _ = roc_curve(labels, probs)
         roc_auc = auc(fpr, tpr)
 
         plt.figure()
-        plt.plot(fpr, tpr, color="darkorange", lw=2, label=f"ROC curve (AUC = {roc_auc:.2f})")
+        plt.plot(fpr, tpr, color="darkorange", lw=2, label=f"ROC curve (AUC = {roc_auc:.3f})")
         plt.plot([0, 1], [0, 1], color="navy", lw=2, linestyle="--")
         plt.xlim([0.0, 1.0])
         plt.ylim([0.0, 1.05])
@@ -402,7 +517,7 @@ class BaseTrainer:
         pr_auc = auc(recall, precision)
 
         plt.figure()
-        plt.plot(recall, precision, color="blue", lw=2, label=f"PR curve (AUC = {pr_auc:.2f})")
+        plt.plot(recall, precision, color="blue", lw=2, label=f"PR curve (AUC = {pr_auc:.3f})")
         plt.xlim([0.0, 1.0])
         plt.ylim([0.0, 1.05])
         plt.xlabel("Recall")
@@ -413,7 +528,7 @@ class BaseTrainer:
         plt.close()
 
         # Plot confusion matrix
-        cm = confusion_matrix(labels, np.argmax(logits, axis=1))
+        cm = confusion_matrix(labels, predictions)
         plt.figure(figsize=(8, 6))
         plt.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)
         plt.title("Confusion Matrix")
