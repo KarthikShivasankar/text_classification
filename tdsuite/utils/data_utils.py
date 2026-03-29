@@ -3,7 +3,7 @@
 import pandas as pd
 import os
 from typing import Union, List, Dict, Any, Optional
-from datasets import load_dataset
+from datasets import load_dataset as hf_load_dataset
 
 
 def load_dataset_from_file(file_path: str) -> pd.DataFrame:
@@ -44,7 +44,7 @@ def load_dataset_from_huggingface(dataset_name: str, split: str = "train") -> pd
         DataFrame containing the dataset
     """
     try:
-        dataset = load_dataset(dataset_name, split=split)
+        dataset = hf_load_dataset(dataset_name, split=split)
         return dataset.to_pandas()
     except Exception as e:
         raise ValueError(f"Failed to load Hugging Face dataset: {str(e)}")

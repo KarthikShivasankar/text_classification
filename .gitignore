@@ -25,6 +25,10 @@ wheels/
 venv/
 env/
 ENV/
+.venv/
+
+# UV
+uv.lock
 
 # IDE
 .idea/
@@ -39,7 +43,7 @@ ENV/
 outputs/
 logs/
 wandb/
-data/
+/data/
 
 # Model checkpoints
 *.pt
@@ -51,6 +55,8 @@ data/
 *.txt
 *.json
 !requirements.txt
+!test-requirements.txt
+!pyproject.toml
 !setup.py
 !README.md
 !LICENSE
@@ -59,4 +65,4 @@ data/
 .DS_Store
 .env
 .coverage
-htmlcov/ 
+htmlcov/

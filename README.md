@@ -1,118 +1,154 @@
-# TD-Classifier Suite (text_classification)
+# TD-Classifier Suite
 
-A comprehensive suite for technical debt classification using transformer models. This package provides tools for training, evaluating, and deploying models to classify technical debt in software development contexts.
+A suite for classifying technical debt in software issues and code comments using transformer models. Supports GPU training, CPU inference via ONNX, and end-to-end pipelines that pull issues directly from any public GitHub repository.
 
 ## Features
 
-- **Binary Classification**: Classify text as either technical debt or not
-- **State-of-the-art Models**: Built on transformer models like BERT, RoBERTa, DistilBERT and DeBERTav3 
-- **Data Processing**: Flexible pipeline for handling various data formats and sources
-- **Advanced Training**: Cross-validation, early stopping, and class weighting for imbalanced datasets
-- **Carbon Tracking**: Monitor carbon emissions during model training
-- **Visualization**: Comprehensive metrics visualization including ROC curves, confusion matrices, and more
-- **CLI Interface**: Easy-to-use command-line tools for training and inference
-- **Batch Processing**: Efficient batch inference for large datasets
-- **Flexible Model Loading**: Support for both local models and Hugging Face models
-- **Multiple Data Sources**: Load data from local files or Hugging Face datasets
-- **Ensemble Inference**: Combine predictions from multiple models with optional weighting for improved accuracy
-- **Data Splitting**: Split data into training and test sets with balanced classes and extract top repositories
+- **Binary Classification** — classify text as technical debt or not across 18 TD categories
+- **Pre-trained Models** — 17 ready-to-use models on Hugging Face Hub, no training required
+- **CPU Inference via ONNX** — export any model to ONNX and run inference without a GPU
+- **GitHub Issues Pipeline** — fetch issues from any public repo, clean them, and classify in three commands
+- **Flexible Training** — cross-validation, early stopping, class weighting for imbalanced data
+- **Ensemble Inference** — combine multiple models with optional per-model weights
+- **Carbon Tracking** — CodeCarbon emissions tracking during training and inference
+- **Multiple Data Sources** — local CSV/JSON/JSONL files or Hugging Face datasets
+- **Gradio Web UI** — browser-based fine-tuning and evaluation interface (`app.py`)
+
+---
 
 ## Installation
 
-```bash
-# Clone the repository
-git clone "our_repo"
-cd our_repo
+### With UV (recommended)
 
-# Install the package
+[UV](https://docs.astral.sh/uv/) is a fast Python package manager.
+
+```bash
+# macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows (PowerShell)
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+```bash
+git clone https://github.com/KarthikShivasankar/text_classification
+cd text_classification
+
+uv venv
+uv pip install -e .                      # runtime
+uv pip install -e ".[dev]"               # adds black, isort, flake8
+uv pip install -r test-requirements.txt  # adds pytest, pytest-cov
+uv pip install -e ".[onnx]"             # adds onnx, onnxruntime for CPU inference
+```
+
+After `uv venv`, point your IDE's Python interpreter to `.venv/Scripts/python.exe` (Windows) or `.venv/bin/python` (Linux/Mac).
+
+### With pip
+
+```bash
+git clone https://github.com/KarthikShivasankar/text_classification
+cd text_classification
 pip install -e .
+pip install -e ".[dev,test,onnx]"   # all optional groups
 ```
 
-For development installation with additional tools:
+### CPU-only (no GPU)
+
+Skip the heavy training stack — install only what's needed for ONNX inference:
+
 ```bash
-pip install -e ".[dev]"
+uv venv
+uv pip install transformers tokenizers tqdm pandas requests numpy onnxruntime onnx
 ```
+
+See [CPU Inference with ONNX](#cpu-inference-with-onnx) for the next steps.
+
+### Publishing to PyPI
+
+```bash
+uv pip install build twine
+python -m build
+twine upload dist/*
+```
+
+---
+
+## Quick Start
+
+### Analyze a GitHub repository for technical debt
+
+```bash
+# 1. Fetch the latest 100 issues
+python scripts/fetch_github_issues.py --repo owner/repo --output issues.csv
+
+# 2. Extract issue body text
+python scripts/extract_issue_bodies.py --input issues.csv --output issue_texts.csv
+
+# 3a. Classify (GPU)
+tdsuite-inference --model_name karths/binary_classification_train_TD --input_file issue_texts.csv
+
+# 3b. Classify (CPU, no GPU needed)
+python scripts/export_onnx.py --model_name karths/binary_classification_train_TD --output model.onnx
+tdsuite-inference --onnx_path model.onnx --input_file issue_texts.csv
+```
+
+---
 
 ## Hugging Face Integration
 
-Our suite is fully compatible with Hugging Face's ecosystem, supporting both datasets and pre-trained models from Hugging Face Hub.
-
 ### Available Datasets
 
-We provide a comprehensive collection of technical debt datasets on Hugging Face, covering various aspects of software development:
-
-- **General Technical Debt**: [karths/binary-10IQR-TD](https://huggingface.co/datasets/karths/binary-10IQR-TD)
-- **Architecture**: [karths/binary-10IQR-architecture](https://huggingface.co/datasets/karths/binary-10IQR-architecture)
-- **Code Quality**: [karths/binary-10IQR-code](https://huggingface.co/datasets/karths/binary-10IQR-code)
-- **Defects**: [karths/binary-10IQR-defect](https://huggingface.co/datasets/karths/binary-10IQR-defect)
-- **Infrastructure**: [karths/binary-10IQR-infrastructure](https://huggingface.co/datasets/karths/binary-10IQR-infrastructure)
-- **Performance**: [karths/binary-10IQR-perf](https://huggingface.co/datasets/karths/binary-10IQR-perf)
-- **Requirements**: [karths/binary-10IQR-requirement](https://huggingface.co/datasets/karths/binary-10IQR-requirement)
-- **Design**: [karths/binary-10IQR-design](https://huggingface.co/datasets/karths/binary-10IQR-design)
-- **Security**: [karths/binary-10IQR-secu](https://huggingface.co/datasets/karths/binary-10IQR-secu)
-- **Usability**: [karths/binary-10IQR-usab](https://huggingface.co/datasets/karths/binary-10IQR-usab)
-- **Compatibility**: [karths/binary-10IQR-comp](https://huggingface.co/datasets/karths/binary-10IQR-comp)
-- **Reliability**: [karths/binary-10IQR-reli](https://huggingface.co/datasets/karths/binary-10IQR-reli)
-- **Process**: [karths/binary-10IQR-process](https://huggingface.co/datasets/karths/binary-10IQR-process)
-- **Build**: [karths/binary-10IQR-build](https://huggingface.co/datasets/karths/binary-10IQR-build)
-- **Maintenance**: [karths/binary-10IQR-main](https://huggingface.co/datasets/karths/binary-10IQR-main)
-- **Automation**: [karths/binary-10IQR-automation](https://huggingface.co/datasets/karths/binary-10IQR-automation)
-- **People**: [karths/binary-10IQR-people](https://huggingface.co/datasets/karths/binary-10IQR-people)
-- **Portability**: [karths/binary-10IQR-port](https://huggingface.co/datasets/karths/binary-10IQR-port)
+| Category | Dataset |
+|----------|---------|
+| General TD | [karths/binary-10IQR-TD](https://huggingface.co/datasets/karths/binary-10IQR-TD) |
+| Architecture | [karths/binary-10IQR-architecture](https://huggingface.co/datasets/karths/binary-10IQR-architecture) |
+| Code Quality | [karths/binary-10IQR-code](https://huggingface.co/datasets/karths/binary-10IQR-code) |
+| Defects | [karths/binary-10IQR-defect](https://huggingface.co/datasets/karths/binary-10IQR-defect) |
+| Infrastructure | [karths/binary-10IQR-infrastructure](https://huggingface.co/datasets/karths/binary-10IQR-infrastructure) |
+| Performance | [karths/binary-10IQR-perf](https://huggingface.co/datasets/karths/binary-10IQR-perf) |
+| Requirements | [karths/binary-10IQR-requirement](https://huggingface.co/datasets/karths/binary-10IQR-requirement) |
+| Design | [karths/binary-10IQR-design](https://huggingface.co/datasets/karths/binary-10IQR-design) |
+| Security | [karths/binary-10IQR-secu](https://huggingface.co/datasets/karths/binary-10IQR-secu) |
+| Usability | [karths/binary-10IQR-usab](https://huggingface.co/datasets/karths/binary-10IQR-usab) |
+| Compatibility | [karths/binary-10IQR-comp](https://huggingface.co/datasets/karths/binary-10IQR-comp) |
+| Reliability | [karths/binary-10IQR-reli](https://huggingface.co/datasets/karths/binary-10IQR-reli) |
+| Process | [karths/binary-10IQR-process](https://huggingface.co/datasets/karths/binary-10IQR-process) |
+| Build | [karths/binary-10IQR-build](https://huggingface.co/datasets/karths/binary-10IQR-build) |
+| Maintenance | [karths/binary-10IQR-main](https://huggingface.co/datasets/karths/binary-10IQR-main) |
+| Automation | [karths/binary-10IQR-automation](https://huggingface.co/datasets/karths/binary-10IQR-automation) |
+| People | [karths/binary-10IQR-people](https://huggingface.co/datasets/karths/binary-10IQR-people) |
+| Portability | [karths/binary-10IQR-port](https://huggingface.co/datasets/karths/binary-10IQR-port) |
 
 ### Pre-trained Models
 
-We provide pre-trained models for each category, available on Hugging Face Hub:
+| Category | Model |
+|----------|-------|
+| General TD | [karths/binary_classification_train_TD](https://huggingface.co/karths/binary_classification_train_TD) |
+| Architecture | [karths/binary_classification_train_architecture](https://huggingface.co/karths/binary_classification_train_architecture) |
+| Code Quality | [karths/binary_classification_train_code](https://huggingface.co/karths/binary_classification_train_code) |
+| Defects | [karths/binary_classification_train_defect](https://huggingface.co/karths/binary_classification_train_defect) |
+| Infrastructure | [karths/binary_classification_train_infrastructure](https://huggingface.co/karths/binary_classification_train_infrastructure) |
+| Performance | [karths/binary_classification_train_perf](https://huggingface.co/karths/binary_classification_train_perf) |
+| Requirements | [karths/binary_classification_train_requirement](https://huggingface.co/karths/binary_classification_train_requirement) |
+| Design | [karths/binary_classification_train_design](https://huggingface.co/karths/binary_classification_train_design) |
+| Security | [karths/binary_classification_train_secu](https://huggingface.co/karths/binary_classification_train_secu) |
+| Usability | [karths/binary_classification_train_usab](https://huggingface.co/karths/binary_classification_train_usab) |
+| Reliability | [karths/binary_classification_train_reli](https://huggingface.co/karths/binary_classification_train_reli) |
+| Process | [karths/binary_classification_train_process](https://huggingface.co/karths/binary_classification_train_process) |
+| Build | [karths/binary_classification_train_build](https://huggingface.co/karths/binary_classification_train_build) |
+| Maintenance | [karths/binary_classification_train_main](https://huggingface.co/karths/binary_classification_train_main) |
+| Automation | [karths/binary_classification_train_automation](https://huggingface.co/karths/binary_classification_train_automation) |
+| People | [karths/binary_classification_train_people](https://huggingface.co/karths/binary_classification_train_people) |
+| Portability | [karths/binary_classification_train_port](https://huggingface.co/karths/binary_classification_train_port) |
 
-- **General Technical Debt**: [karths/binary_classification_train_TD](https://huggingface.co/karths/binary_classification_train_TD)
-- **Architecture**: [karths/binary_classification_train_architecture](https://huggingface.co/karths/binary_classification_train_architecture)
-- **Code Quality**: [karths/binary_classification_train_code](https://huggingface.co/karths/binary_classification_train_code)
-- **Defects**: [karths/binary_classification_train_defect](https://huggingface.co/karths/binary_classification_train_defect)
-- **Infrastructure**: [karths/binary_classification_train_infrastructure](https://huggingface.co/karths/binary_classification_train_infrastructure)
-- **Performance**: [karths/binary_classification_train_perf](https://huggingface.co/karths/binary_classification_train_perf)
-- **Requirements**: [karths/binary_classification_train_requirement](https://huggingface.co/karths/binary_classification_train_requirement)
-- **Design**: [karths/binary_classification_train_design](https://huggingface.co/karths/binary_classification_train_design)
-- **Security**: [karths/binary_classification_train_secu](https://huggingface.co/karths/binary_classification_train_secu)
-- **Usability**: [karths/binary_classification_train_usab](https://huggingface.co/karths/binary_classification_train_usab)
-- **Reliability**: [karths/binary_classification_train_reli](https://huggingface.co/karths/binary_classification_train_reli)
-- **Process**: [karths/binary_classification_train_process](https://huggingface.co/karths/binary_classification_train_process)
-- **Build**: [karths/binary_classification_train_build](https://huggingface.co/karths/binary_classification_train_build)
-- **Maintenance**: [karths/binary_classification_train_main](https://huggingface.co/karths/binary_classification_train_main)
-- **Automation**: [karths/binary_classification_train_automation](https://huggingface.co/karths/binary_classification_train_automation)
-- **People**: [karths/binary_classification_train_people](https://huggingface.co/karths/binary_classification_train_people)
-- **Portability**: [karths/binary_classification_train_port](https://huggingface.co/karths/binary_classification_train_port)
-
-### Using Hugging Face Datasets and Models
-
-You can use these datasets and models directly with our suite:
-
-```bash
-# Using a Hugging Face dataset
-tdsuite-train \
-    --data_file "karths/binary-10IQR-TD" \
-    --model_name "distilbert-base-uncased" \
-    --positive_category "TD" \
-    --output_dir "outputs/binary" \
-    --is_huggingface_dataset
-
-# Using a pre-trained model from Hugging Face
-tdsuite-inference \
-    --model_name "karths/binary_classification_train_TD" \
-    --input_file "data/split/test.csv"
-```
+---
 
 ## Usage
 
-### Data Preparation
+### 1. Data Preparation
 
-The package supports loading data from both local files and Hugging Face datasets:
+Input data must be CSV, JSON, or JSONL with at least a `text` column and a `label` column (0/1):
 
-#### Local Files
-The package expects data in CSV, JSON, or JSONL format with at least two columns:
-- `text`: The text content to classify
-- `label`: The class label (0 or 1 for binary classification)
-
-Example CSV data format with numeric labels:
 ```csv
 text,label
 "This code has complex logic that should be simplified",1
@@ -120,323 +156,346 @@ text,label
 "The architecture violates the single responsibility principle",1
 ```
 
-#### Data Splitting
-
-You can split your data into training and test sets with balanced classes, and extract top repositories:
+Split a dataset into balanced train/test sets and extract top-contributing repositories:
 
 ```bash
-# Using a Hugging Face dataset with numeric labels
-tdsuite-split-data --data_file "karths/binary-10IQR-TD" \
-                   --output_dir "data/split" \
-                   --is_numeric_labels \
-                   --repo_column "repo" \
-                   --is_huggingface_dataset
+tdsuite-split-data \
+    --data_file "karths/binary-10IQR-TD" \
+    --output_dir "data/split" \
+    --is_numeric_labels \
+    --repo_column "repo" \
+    --is_huggingface_dataset
 ```
 
-This will:
-1. Load the data from the Hugging Face dataset
-2. Use the existing numeric labels (0/1) directly
-3. Balance the classes in the dataset
-4. Split the data into training and test sets
-5. Extract the top repositories with the most positive class samples
-6. Save the split data to the specified output directory
+Outputs: `data/split/train.csv`, `data/split/test.csv`, `data/split/top_repos.csv`.
 
-The output directory will contain:
-- `train.csv`: Training data with balanced classes
-- `test.csv`: Test data with balanced classes
-- `top_repos.csv`: Data from the top repositories with balanced classes
+### 2. Training
 
-### Training
-
-Train a model to classify text as either technical debt or not:
+Training requires a CUDA GPU. On CPU the script will warn and proceed, but runtime will be very long — use [ONNX inference](#cpu-inference-with-onnx) with a pre-trained model instead.
 
 ```bash
-# Using a Hugging Face dataset with text labels
+# Train on a Hugging Face dataset
 tdsuite-train \
-    --data_file "karths/binary-10IQR-people" \
+    --data_file "karths/binary-10IQR-TD" \
     --model_name "distilbert-base-uncased" \
-    --positive_category "people" \
+    --numeric_labels \
     --output_dir "outputs/binary" \
     --batch_size 16 \
-    --learning_rate 1e-5 \
+    --learning_rate 2e-5 \
     --num_epochs 5 \
-    --warmup_steps 1000 \
-    --cross_validation \
-    --n_splits 5
+    --warmup_steps 1000
 
-# Using a local data file with text labels
+# Train on a local file with categorical labels
 tdsuite-train \
     --data_file "data/split/train.csv" \
     --model_name "distilbert-base-uncased" \
     --positive_category "TD" \
-    --output_dir "outputs/binary" \
-    --batch_size 16 \
-    --learning_rate 1e-5 \
-    --num_epochs 5 \
-    --warmup_steps 1000
+    --output_dir "outputs/binary"
+
+# 5-fold cross-validation
+tdsuite-train \
+    --data_file "karths/binary-10IQR-TD" \
+    --model_name "distilbert-base-uncased" \
+    --numeric_labels \
+    --output_dir "outputs/cv" \
+    --cross_validation \
+    --n_splits 5
 ```
 
-#### Training Arguments
+**Training arguments:**
 
-The training script supports the following arguments:
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--data_file` | *(required)* | Local file path or HF dataset name |
+| `--model_name` | *(required)* | HF model name or local path |
+| `--output_dir` | *(required)* | Directory to save model and outputs |
+| `--text_column` | `text` | Text column name |
+| `--label_column` | `label` | Label column name |
+| `--positive_category` | — | Label value for the positive class (categorical labels) |
+| `--numeric_labels` | `false` | Labels are already 0/1 integers |
+| `--is_huggingface_dataset` | `false` | Load from Hugging Face Hub |
+| `--num_epochs` | `3` | Training epochs |
+| `--batch_size` | `16` | Per-device batch size |
+| `--learning_rate` | `2e-5` | Learning rate |
+| `--weight_decay` | `0.01` | Weight decay |
+| `--warmup_steps` | `500` | LR warmup steps |
+| `--gradient_accumulation_steps` | `1` | Gradient accumulation |
+| `--cross_validation` | `false` | Enable k-fold cross-validation |
+| `--n_splits` | `5` | Number of CV folds |
+| `--max_length` | `512` | Max token sequence length |
+| `--seed` | `42` | Random seed |
 
-- **Data Arguments**:
-  - `--data_file`: Path to data file or Hugging Face dataset name (required)
-  - `--text_column`: Name of the text column (default: "text")
-  - `--label_column`: Name of the label column (default: "label")
-  - `--is_huggingface_dataset`: Flag to indicate if data is from Hugging Face
-  - `--numeric_labels`: Flag to indicate if labels are already numeric (0/1)
-  - `--positive_category`: Positive category for binary classification
-
-- **Model Arguments**:
-  - `--model_name`: Name of the model to use (required)
-  - `--max_length`: Maximum sequence length (default: 512)
-
-- **Training Arguments**:
-  - `--output_dir`: Directory to save the model and outputs (required)
-  - `--num_epochs`: Number of training epochs (default: 3)
-  - `--batch_size`: Batch size (default: 16)
-  - `--learning_rate`: Learning rate (default: 2e-5)
-  - `--weight_decay`: Weight decay (default: 0.01)
-  - `--warmup_steps`: Number of warmup steps (default: 500)
-  - `--gradient_accumulation_steps`: Number of gradient accumulation steps (default: 1)
-
-- **Cross-validation Arguments**:
-  - `--cross_validation`: Flag to enable cross-validation
-  - `--n_splits`: Number of splits for cross-validation (default: 5)
-
-- **Additional Arguments**:
-  - `--seed`: Random seed (default: 42)
-  - `--device`: Device to use (cuda, cpu, or None for auto-detection)
-
-#### Cross-Validation
-
-Cross-validation helps evaluate model performance more robustly:
-
-```bash
-tdsuite-train --data_file "karths/binary-10IQR-port" \
-              --model_name "distilbert-base-uncased" \
-              --positive_category "port" \
-              --output_dir "outputs/cv" \
-              --batch_size 16 \
-              --learning_rate 1e-5 \
-              --num_epochs 5 \
-              --warmup_steps 1000 \
-              --cross_validation \
-              --n_splits 5
+Cross-validation output structure:
+```
+outputs/cv/
+├── fold_0/ … fold_N/
+│   ├── metrics.json
+│   ├── confusion_matrix.png
+│   └── roc_curve.png
+├── cross_validation_results.json
+└── cross_validation_visualization.png
 ```
 
-This will:
-1. Split the data into 5 folds (or specified number of splits)
-2. Train a model on each fold
-3. Evaluate on the held-out fold
-4. Aggregate the results across all folds
-5. Generate visualizations of the cross-validation results
-6. Save metrics and model checkpoints for each fold
+### 3. Inference
 
-The cross-validation output directory will contain:
-- `fold_0/` to `fold_N/`: Individual fold results
-  - `metrics.json`: Training and evaluation metrics
-  - `confusion_matrix.png`: Confusion matrix visualization
-  - `roc_curve.png`: ROC curve visualization
-- `cross_validation_results.json`: Aggregated results across all folds
-- `cross_validation_visualization.png`: Visualization of cross-validation performance
-
-### Inference
-
-#### Batch Inference
-
-Process multiple texts from a file:
+#### Single model (GPU)
 
 ```bash
-# Using a local model
-tdsuite-inference \
-    --model_path "outputs/binary" \
-    --input_file "data/split/test.csv"
+# From a local checkpoint
+tdsuite-inference --model_path "outputs/binary" --input_file "data/split/test.csv"
 
-# Using a Hugging Face model
-tdsuite-inference \
-    --model_name "karths/binary_classification_train_TD" \
-    --input_file "data/split/test.csv"
+# From Hugging Face
+tdsuite-inference --model_name "karths/binary_classification_train_TD" --input_file "data/split/test.csv"
 
-# Using a custom results directory
-tdsuite-inference \
-    --model_path "outputs/binary" \
-    --input_file "data/split/test.csv" \
-    --results_dir "custom_results"
+# Single text
+tdsuite-inference --model_name "karths/binary_classification_train_TD" --text "This service has no error handling"
 ```
 
-The inference script automatically creates a timestamped directory for each run inside the model's output folder. For example, if you run inference with a model in `outputs/binary`, it will create a directory like `outputs/binary/inference_20240411_074955/` containing:
-
-- `predictions_test.csv`: Model predictions
-- `metrics/`: Directory containing evaluation results
-  - `metrics.json`: Evaluation metrics
-  - `confusion_matrix.png`: Confusion matrix visualization
-  - `roc_curve.png`: ROC curve visualization
-
-#### Ensemble Inference
-
-You can combine multiple models into an ensemble for improved prediction accuracy:
+#### Ensemble (GPU)
 
 ```bash
-# Using multiple local models
 tdsuite-inference \
-    --model_paths "outputs/model1" "outputs/model2" "outputs/model3" \
-    --input_file "data/split/test.csv" \
-    --weights 0.5 0.3 0.2
-
-# Using multiple Hugging Face models
-tdsuite-inference \
-    --model_names "karths/binary_classification_train_TD" "binary_classification_train_architecture" \
+    --model_names "karths/binary_classification_train_TD" \
+                  "karths/binary_classification_train_code" \
     --input_file "data/split/test.csv" \
     --weights 0.6 0.4
-    
-
 ```
 
-Key features of ensemble inference:
-- Combine multiple models for more robust predictions
-- Assign custom weights to each model (optional)
-- Mix local and Hugging Face models in a single ensemble
-- Equal weights are applied automatically if not specified
+#### CPU inference via ONNX (no GPU)
 
-The ensemble approach works by:
-1. Loading each model independently
-2. Running inference with each model for the input text
-3. Combining the probability outputs using weighted averaging
-4. Determining the final prediction based on the combined probabilities
-
-#### Inference Arguments
-
-The inference script supports the following arguments:
-
-- **Model Arguments**:
-  - `--model_path`: Path to a local model (required if not using model_name)
-  - `--model_name`: Name of a model on Hugging Face (required if not using model_path)
-  - `--model_paths`: Paths to multiple local models for ensemble
-  - `--model_names`: Names of multiple Hugging Face models for ensemble
-  - `--weights`: Weights for ensemble models (optional)
-
-- **Input Arguments**:
-  - `--text`: Single text to classify
-  - `--input_file`: Path to a file with texts (CSV or JSON)
-  - `--text_column`: Name of the text column (default: "text")
-
-- **Output Arguments**:
-  - `--output_file`: Path to save predictions (optional)
-  - `--results_dir`: Custom directory to store results (optional)
-  - `--max_length`: Maximum sequence length (default: 512)
-  - `--batch_size`: Batch size for inference (default: 32)
-  - `--device`: Device to use for inference (cuda, cpu, or None for auto-detection)
-
-#### Results Organization
-
-Each inference run creates a new timestamped directory with the following structure:
-
-```
-outputs/model_name/
-└── inference_YYYYMMDD_HHMMSS/
-    ├── predictions_[input_filename].csv
-    └── metrics/
-        ├── metrics.json
-        ├── confusion_matrix.png
-        └── roc_curve.png
+```bash
+tdsuite-inference --onnx_path model.onnx --input_file "data/split/test.csv"
 ```
 
-This organization allows you to:
-- Keep track of different inference runs chronologically
-- Compare results across different runs
-- Maintain a clean separation between model files and inference results
-- Optionally specify a custom results directory with `--results_dir`
+**Inference arguments:**
 
-### Output Files
+| Argument | Description |
+|----------|-------------|
+| `--model_path` | Local model directory |
+| `--model_name` | HF model name |
+| `--model_paths` | Multiple local models (ensemble) |
+| `--model_names` | Multiple HF models (ensemble) |
+| `--onnx_path` | ONNX model file for CPU inference |
+| `--text` | Single text string to classify |
+| `--input_file` | CSV/JSON file to classify |
+| `--text_column` | Text column name (default: `text`) |
+| `--output_file` | Path to save predictions |
+| `--results_dir` | Custom results directory |
+| `--batch_size` | Batch size (default: `32`) |
+| `--max_length` | Max token length (default: `512`) |
+| `--device` | `cuda` or `cpu` (default: `cuda`) |
+| `--weights` | Per-model weights for ensemble |
+| `--disable_progress_bar` | Hide tqdm progress bars |
+| `--track_emissions` | Track carbon emissions (default: `true`) |
 
-After training, the following files will be saved in the output directory:
+Each inference run creates a timestamped output directory:
+```
+outputs/binary/inference_YYYYMMDD_HHMMSS/
+├── predictions_test.csv
+└── metrics/
+    ├── metrics.json
+    ├── confusion_matrix.png
+    └── roc_curve.png
+```
 
-- `pytorch_model.bin`: The trained model weights
-- `model_config.json`: Model configuration
-- `training_config.json`: Training configuration
-- `data_config.json`: Data processing configuration
-- `metrics.json`: Training and evaluation metrics
-- `confusion_matrix.png`: Confusion matrix visualization
-- `roc_curve.png`: ROC curve visualization
-- `carbon_emissions.json`: Carbon emissions data from training
+---
 
-After inference with ground truth labels, the following files will be saved:
+## CPU Inference with ONNX
 
-- `predictions.csv`: Model predictions
-- `metrics.json`: Evaluation metrics
-- `confusion_matrix.png`: Confusion matrix visualization
-- `roc_curve.png`: ROC curve visualization
+Export any trained or pre-trained model to ONNX and run inference on CPU without any GPU. ONNX inference is typically 2–4× faster than PyTorch on CPU.
+
+### Step 1 — Install ONNX dependencies
+
+```bash
+uv pip install -e ".[onnx]"
+# or: pip install onnx onnxruntime
+```
+
+### Step 2 — Export to ONNX
+
+```bash
+# From a local checkpoint
+python scripts/export_onnx.py --model_path outputs/binary --output model.onnx
+
+# Directly from Hugging Face (no training required)
+python scripts/export_onnx.py \
+    --model_name karths/binary_classification_train_TD \
+    --output model.onnx
+```
+
+The tokenizer is saved alongside `model.onnx` automatically.
+
+### Step 3 — Run CPU inference
+
+```bash
+tdsuite-inference --onnx_path model.onnx --input_file issue_texts.csv
+```
+
+`--onnx_path` bypasses PyTorch and GPU entirely. Do not combine with `--model_path` / `--model_name`.
+
+**Export arguments:**
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--model_path` | — | Local model directory *(mutually exclusive with `--model_name`)* |
+| `--model_name` | — | HF model name *(mutually exclusive with `--model_path`)* |
+| `--output` | *(required)* | Destination `.onnx` file |
+| `--max_length` | `512` | Sequence length for the export dummy input |
+| `--opset` | `14` | ONNX opset version |
+
+---
+
+## GitHub Issues Analysis
+
+Analyze technical debt in any public GitHub repository in three commands.
+
+### Step 1 — Fetch issues
+
+By default fetches the **latest 100 issues**, sorted newest-first.
+
+```bash
+# Latest 100 (default)
+python scripts/fetch_github_issues.py --repo owner/repo --output issues.csv
+
+# Latest N issues
+python scripts/fetch_github_issues.py --repo owner/repo --limit 500 --output issues.csv
+
+# Every issue across all pages
+python scripts/fetch_github_issues.py --repo owner/repo --all --output issues.csv
+```
+
+**Rate limit exceeded?** Unauthenticated API calls are capped at 60/hour. Supply a token to raise this to 5,000/hour:
+
+```bash
+python scripts/fetch_github_issues.py \
+    --repo owner/repo \
+    --token "$GITHUB_TOKEN" \
+    --output issues.csv
+```
+
+Create a token at <https://github.com/settings/tokens> — no scopes are needed for public repos.
+
+When the limit is hit the script prints the exact wait time and the token creation link automatically.
+
+Output columns: `id`, `number`, `title`, `body`, `state`, `created_at`, `updated_at`, `closed_at`, `user_login`, `labels`, `comments`, `url`.
+
+### Step 2 — Clean issue bodies
+
+```bash
+python scripts/extract_issue_bodies.py \
+    --input issues.csv \
+    --output issue_texts.csv \
+    --min-length 50 \
+    --drop-duplicates \
+    --keep-metadata
+```
+
+Produces a CSV with a `text` column ready for inference. `--keep-metadata` also keeps `number` and `title` for traceability back to the original issue.
+
+### Step 3 — Run inference
+
+```bash
+# GPU
+tdsuite-inference \
+    --model_name "karths/binary_classification_train_TD" \
+    --input_file issue_texts.csv
+
+# CPU (ONNX)
+tdsuite-inference \
+    --onnx_path model.onnx \
+    --input_file issue_texts.csv
+
+# Ensemble — detect both general TD and code quality issues
+tdsuite-inference \
+    --model_names "karths/binary_classification_train_TD" \
+                  "karths/binary_classification_train_code" \
+    --input_file issue_texts.csv \
+    --weights 0.6 0.4
+```
+
+---
 
 ## Project Structure
 
 ```
-tdsuite/
-├── config/             # Configuration management
-│   ├── __init__.py
-│   └── config.py       # Configuration classes
-├── data/               # Data processing and dataset classes
-│   ├── __init__.py
-│   ├── dataset.py      # Dataset and processor classes
-│   └── data_splitter.py # Data splitting utilities
-├── models/             # Model implementations
-│   ├── __init__.py
-│   ├── base.py         # Base model class
-│   └── transformer.py  # Transformer model implementation
-├── trainers/           # Training utilities
-│   ├── __init__.py
-│   ├── base.py         # Base trainer class
-│   └── td_trainer.py   # Technical debt trainer
-├── utils/              # Utility functions
-│   ├── __init__.py
-│   └── inference.py    # Inference engine
-├── train.py            # Training script
-├── inference.py        # Inference script
-└── split_data.py       # Data splitting script
+text_classification/
+├── scripts/
+│   ├── fetch_github_issues.py   # Fetch issues from any public GitHub repo → CSV
+│   ├── extract_issue_bodies.py  # Clean issue CSV → text column ready for inference
+│   └── export_onnx.py           # Export a transformer model to ONNX for CPU inference
+├── tdsuite/
+│   ├── cli.py                   # All argparse parsers (single source of truth)
+│   ├── train.py                 # tdsuite-train entry point
+│   ├── inference.py             # tdsuite-inference entry point
+│   ├── split_data.py            # tdsuite-split-data entry point
+│   ├── config/
+│   │   └── config.py            # ModelConfig, TrainingConfig, DataConfig, InferenceConfig
+│   ├── data/
+│   │   ├── dataset.py           # TDDataset, TDProcessor, BinaryTDProcessor
+│   │   └── data_splitter.py     # DataSplitter — balanced splits, top-repo extraction
+│   ├── models/
+│   │   ├── base.py              # BaseModel with weighted loss support
+│   │   └── transformer.py       # TransformerModel (load, predict, save)
+│   ├── trainers/
+│   │   ├── base.py              # WeightedLossTrainer, BaseTrainer
+│   │   └── td_trainer.py        # TDTrainer — cross-validation, early stopping, ensemble
+│   └── utils/
+│       ├── inference.py         # InferenceEngine, EnsembleInferenceEngine
+│       ├── onnx_inference.py    # OnnxInferenceEngine — CPU inference via ONNX Runtime
+│       ├── metrics.py           # compute_metrics, confusion matrix, ROC plots
+│       └── data_utils.py        # load_dataset, preprocess_text
+├── pyproject.toml               # Packaging, tool config (black/isort/pytest), optional deps
+├── requirements.txt             # Runtime dependencies
+└── test-requirements.txt        # pytest, pytest-cov
 ```
 
-## Advanced Usage
+---
 
-### Early Stopping
+## Web UI
 
-Early stopping prevents overfitting by stopping training when the model stops improving:
+A Gradio interface for fine-tuning and evaluation without the CLI:
 
 ```bash
-tdsuite-train --data_file "karths/binary-10IQR-port" \
-              --model_name "karths/binary_classification_train_port" \
-              --positive_category "port" \
-              --output_dir "outputs/early_stopping" \
-              --early_stopping \
-              --patience 5
+pip install gradio
+python app.py
 ```
 
-This will:
-1. Monitor the evaluation loss during training
-2. Stop training if the loss doesn't improve for 5 epochs
-3. Restore the model from the best checkpoint
+Opens at `http://localhost:7077`. Supports CSV upload, model selection, training, and downloading predictions.
 
-### Carbon Emissions Tracking
+---
 
-Track the carbon emissions of your training process:
+## Output Files
 
-```bash
-tdsuite-train --data_file "karths/binary-10IQR-port" \
-              --model_name "distilbert-base-uncased" \
-              --positive_category "port" \
-              --output_dir "outputs/emissions" \
-              --track_emissions
+**After training:**
+```
+outputs/binary/
+├── pytorch_model.bin
+├── config.json
+├── tokenizer files
+├── training_config.json
+├── metrics.json
+├── confusion_matrix.png
+├── roc_curve.png
+└── emissions/emissions.csv
 ```
 
-This will:
-1. Track energy consumption during training
-2. Calculate carbon emissions based on your location
-3. Save the emissions data to a CSV file
+**After inference:**
+```
+outputs/binary/inference_YYYYMMDD_HHMMSS/
+├── predictions_<input>.csv
+├── metrics/
+│   ├── metrics.json
+│   ├── confusion_matrix.png
+│   └── roc_curve.png
+└── emissions/inference_emissions.csv
+```
+
+---
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome. Please open a pull request with a clear description of the change.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT — see [LICENSE](LICENSE).
