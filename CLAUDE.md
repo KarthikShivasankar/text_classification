@@ -10,13 +10,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Installation (UV — preferred)
 ```bash
-uv venv && uv pip install -e .
-uv pip install -e ".[dev]"          # adds black, isort, flake8
+uv venv && uv sync           # installs torch with CUDA 12.4 via [tool.uv.sources]
+uv pip install -e ".[dev]"   # adds black, isort, flake8
 uv pip install -r test-requirements.txt  # adds pytest, pytest-cov
 ```
 
 ### Installation (pip fallback)
 ```bash
+# Install PyTorch with CUDA first (required — plain PyPI torch is CPU-only)
+pip install torch --index-url https://download.pytorch.org/whl/cu124
 pip install -e ".[dev,test]"
 ```
 
