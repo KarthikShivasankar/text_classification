@@ -1,4 +1,4 @@
-# TD-Classifier Suite
+.v# TD-Classifier Suite
 
 A suite for detecting and classifying **technical debt** in software repositories using transformer models. It covers 18 TD categories (architecture, security, performance, code quality, and more), ships 17 pre-trained models on Hugging Face, and works end-to-end from raw GitHub issues to structured predictions — with or without a GPU.
 
@@ -31,6 +31,10 @@ A suite for detecting and classifying **technical debt** in software repositorie
   - [GitHub Actions — nightly repo scan](#github-actions--nightly-repo-scan)
   - [GitLab CI](#gitlab-ci)
   - [Docker / self-hosted runners](#docker--self-hosted-runners)
+- [Testing](#testing)
+  - [Running the test suite](#running-the-test-suite)
+  - [Test coverage by module](#test-coverage-by-module)
+  - [What each test file covers](#what-each-test-file-covers)
 - [Output Files](#output-files)
 - [Project Structure](#project-structure)
 - [Contributing](#contributing)
@@ -958,6 +962,108 @@ text_classification/
 ├── requirements.txt             # runtime dependencies
 └── test-requirements.txt        # pytest, pytest-cov
 ```
+
+---
+
+---
+
+## Testing
+
+The test suite uses **pytest** with coverage reporting. All tests run entirely offline — no GPU, no HuggingFace model downloads. Transformer model calls are mocked with `unittest.mock`.
+
+### Running the test suite
+
+**Install test dependencies first:**
+
+```bash
+# UV (recommended)
+uv pip install -r test-requirements.txt
+
+# pip fallback
+pip install pytest pytest-cov
+```
+
+**Run all tests with coverage:**
+
+```bash
+pytest
+```
+
+This uses the config in `pyproject.toml` (`testpaths = ["tests"]`, `--cov=tdsuite`).
+
+**Run a specific test file:**
+
+```bash
+pytest tests/test_config.py -v
+pytest tests/test_data_splitter.py -v
+pytest tests/test_metrics.py -v
+```
+
+**Run a specific test class or function:**
+
+```bash
+pytest tests/test_config.py::TestModelConfig -v
+pytest tests/test_cli.py::TestInferenceParser::test_ensemble_model_paths -v
+```
+
+**Run with detailed coverage report:**
+
+```bash
+pytest --cov=tdsuite --cov-report=term-missing --cov-report=html
+# Open htmlcov/index.html in a browser for the line-by-line report
+```
+
+**Run only fast unit tests (skip any marked slow):**
+
+```bash
+pytest -m "not slow" -v
+```
+
+**Expected output (all passing):**
+
+```
+tests/test_cli.py                      ............. 35 passed
+tests/test_config.py                   ............. 22 passed
+tests/test_data_splitter.py            ............. 17 passed
+tests/test_data_utils.py               ............. 10 passed
+tests/test_dataset.py                  ............. 22 passed
+tests/test_extract_issue_bodies.py     ............. 20 passed
+tests/test_inference.py                ............. 22 passed
+tests/test_metrics.py                  ............. 14 passed
+```
+
+### Test coverage by module
+
+| Module | Test file | What is tested |
+|---|---|---|
+| `tdsuite/config/config.py` | `test_config.py` | `ModelConfig`, `TrainingConfig`, `DataConfig`, `InferenceConfig`, `Config` — defaults, `to_dict`, `from_dict`, `save`, `load` |
+| `tdsuite/utils/data_utils.py` | `test_data_utils.py` | `load_dataset_from_file` (CSV/JSON/JSONL), `load_dataset` auto-detection, `preprocess_text` truncation & whitespace |
+| `tdsuite/data/dataset.py` | `test_dataset.py` | `TDDataset` indexing & length; `TDProcessor` load/tokenize; `BinaryTDProcessor` binary conversion, `extract_top_repo`, `extract_top_repos_by_category` |
+| `tdsuite/data/data_splitter.py` | `test_data_splitter.py` | `DataSplitter` load, preprocess, `balance_classes`, `split_and_save` with/without repo column; standalone `split_data()` |
+| `tdsuite/utils/metrics.py` | `test_metrics.py` | `compute_metrics` return structure, value ranges, perfect-prediction case, JSON/PNG outputs |
+| `tdsuite/cli.py` | `test_cli.py` | All six `get_*_parser()` functions — required args, defaults, flags, mutually-exclusive groups, error cases |
+| `scripts/extract_issue_bodies.py` | `test_extract_issue_bodies.py` | `clean_text` — code blocks, HTML, Markdown, URLs, emoji, whitespace; full CSV pipeline |
+| `tdsuite/utils/inference.py` | `test_inference.py` | `InferenceEngine` `predict_single`, `predict_batch`, `predict_from_file`; `EnsembleInferenceEngine` init, weight normalisation, `predict_single`, `predict_batch` — all mocked |
+
+### What each test file covers
+
+**`tests/conftest.py`** — shared fixtures: `binary_df`, `categorical_df`, `repo_df`, `csv_file`, `json_file`, `jsonl_file`, `predictions_df`.
+
+**`tests/test_config.py`** — verifies that every config dataclass serialises to/from JSON correctly and that `save()`/`load()` round-trips work for both file and directory targets.
+
+**`tests/test_data_utils.py`** — verifies that local CSV/JSON/JSONL files load correctly, that missing files raise `FileNotFoundError`, unsupported formats raise `ValueError`, and that `preprocess_text` truncates and collapses whitespace.
+
+**`tests/test_dataset.py`** — verifies `TDDataset` item shapes and label values; `TDProcessor` calls the tokenizer with the correct kwargs; `BinaryTDProcessor` converts categorical labels, raises on missing `positive_category`, and correctly extracts top repos.
+
+**`tests/test_data_splitter.py`** — verifies train/test split files are created, sizes are approximately correct (±5%), train and test sets do not overlap, top-repo extraction writes `top_repos.csv`, and label mappings are saved for categorical data.
+
+**`tests/test_metrics.py`** — verifies all metric keys are present, values are in `[0, 1]`, perfect predictions yield 1.0 for accuracy/F1/MCC, `metrics.json` and PNG plots are written when `output_dir` is given, and nothing is written when `output_dir` is `None`.
+
+**`tests/test_cli.py`** — parses argument vectors for all six CLI commands and asserts correct defaults, custom values, and that `SystemExit` is raised for invalid/missing arguments and mutually-exclusive conflicts.
+
+**`tests/test_extract_issue_bodies.py`** — calls `clean_text()` with various inputs (fenced code blocks, inline code, HTML tags, markdown links, images, headings, bold, lists, blockquotes, emoji, extra whitespace) and verifies both removal of noise and preservation of prose; also exercises the CSV pipeline and deduplication logic.
+
+**`tests/test_inference.py`** — patches `TransformerModel` and `AutoTokenizer` (for `InferenceEngine`) and `AutoModelForSequenceClassification`/`AutoTokenizer` (for `EnsembleInferenceEngine`) to avoid any network access or GPU requirement; verifies output structure, probability ranges, file I/O, and error handling.
 
 ---
 

@@ -239,7 +239,7 @@ class DataSplitter:
         # Save the label mappings
         if not self.is_numeric_labels:
             unique_labels = df[self.label_column].unique()
-            label_map = {idx: label for idx, label in enumerate(unique_labels)}
+            label_map = {idx: int(label) for idx, label in enumerate(unique_labels)}
             with open(os.path.join(self.output_dir, "label_mappings.json"), "w") as f:
                 json.dump(label_map, f, indent=4)
         
