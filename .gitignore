@@ -19,6 +19,7 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+*.ipynb
 
 # Virtual Environment
 venv/
@@ -38,6 +39,7 @@ ENV/
 outputs/
 logs/
 wandb/
+data/
 
 # Model checkpoints
 *.pt

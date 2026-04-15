@@ -206,6 +206,43 @@ The inference script automatically creates a timestamped directory for each run 
   - `confusion_matrix.png`: Confusion matrix visualization
   - `roc_curve.png`: ROC curve visualization
 
+#### Ensemble Inference
+
+You can combine multiple models into an ensemble for improved prediction accuracy:
+
+```bash
+# Using multiple local models
+tdsuite-inference \
+    --model_paths "outputs/model1" "outputs/model2" "outputs/model3" \
+    --input_file "data/split/test.csv" \
+    --weights 0.5 0.3 0.2
+
+# Using multiple Hugging Face models
+tdsuite-inference \
+    --model_names "karths/TD_model_Deberta" "karths/TD_model_Roberta" \
+    --input_file "data/split/test.csv" \
+    --weights 0.6 0.4
+    
+# Using a mix of local and Hugging Face models
+tdsuite-inference \
+    --model_paths "outputs/model1" \
+    --model_names "karths/TD_model_Roberta" \
+    --input_file "data/split/test.csv" \
+    --weights 0.7 0.3
+```
+
+Key features of ensemble inference:
+- Combine multiple models for more robust predictions
+- Assign custom weights to each model (optional)
+- Mix local and Hugging Face models in a single ensemble
+- Equal weights are applied automatically if not specified
+
+The ensemble approach works by:
+1. Loading each model independently
+2. Running inference with each model for the input text
+3. Combining the probability outputs using weighted averaging
+4. Determining the final prediction based on the combined probabilities
+
 #### Inference Arguments
 
 The inference script supports the following arguments:

@@ -9,10 +9,14 @@ import numpy as np
 import pandas as pd
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, PreTrainedModel, PreTrainedTokenizer
+import warnings
 
 from tdsuite.config.config import Config
 from tdsuite.data.dataset import TDProcessor
 from ..models.transformer import TransformerModel
+
+# Suppress FutureWarning from codecarbon
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 
 class InferenceEngine:
@@ -263,39 +267,70 @@ class EnsembleInferenceEngine:
             device: Device to use for inference
             weights: Optional weights for each model in the ensemble
         """
+        print(f"Initializing EnsembleInferenceEngine with:")
+        print(f"  model_paths: {model_paths}")
+        print(f"  model_names: {model_names}")
+        print(f"  device: {device}")
+        
         self.model_paths = model_paths or []
         self.model_names = model_names or []
         self.max_length = max_length
         self.device = device
-        self.show_progress = True  # Default to showing progress bars
+        self.show_progress = True
 
-        # Set weights
-        if weights is None:
-            self.weights = [1.0 / len(self.model_paths)] * len(self.model_paths)
-        else:
-            self.weights = weights
-            
+        # Validate inputs
+        if not self.model_paths and not self.model_names:
+            raise ValueError("At least one of model_paths or model_names must be provided")
+
         # Load models and tokenizers
         self.models = []
         self.tokenizers = []
         
-        for i, (path, name) in enumerate(zip(self.model_paths, self.model_names)):
-            if path and os.path.exists(path):
-                # Load from local checkpoint
-                model = TransformerModel.load_from_checkpoint(path)
-            else:
-                # Load from Hugging Face
-                model = TransformerModel.from_pretrained(
-                    name,
-                    num_labels=2,  # Binary classification
-                    max_length=self.max_length,
-                    device=self.device,
-                )
-                
-            model.to(self.device)
-            model.eval()
-            self.models.append(model)
-            self.tokenizers.append(AutoTokenizer.from_pretrained(name))
+        # Load models from local paths
+        for model_path in self.model_paths:
+            try:
+                print(f"Loading model from path: {model_path}")
+                model = AutoModelForSequenceClassification.from_pretrained(model_path)
+                tokenizer = AutoTokenizer.from_pretrained(model_path)
+                model.to(self.device)
+                model.eval()
+                self.models.append(model)
+                self.tokenizers.append(tokenizer)
+                print(f"Successfully loaded model from {model_path}")
+            except Exception as e:
+                print(f"Error loading model from {model_path}: {str(e)}")
+                continue
+            
+        # Load models from Hugging Face
+        for model_name in self.model_names:
+            try:
+                print(f"Loading model from Hugging Face: {model_name}")
+                model = AutoModelForSequenceClassification.from_pretrained(model_name)
+                tokenizer = AutoTokenizer.from_pretrained(model_name)
+                model.to(self.device)
+                model.eval()
+                self.models.append(model)
+                self.tokenizers.append(tokenizer)
+                print(f"Successfully loaded model {model_name}")
+            except Exception as e:
+                print(f"Error loading model {model_name}: {str(e)}")
+                continue
+            
+        # Validate that we loaded at least one model
+        if not self.models:
+            raise ValueError("No models were successfully loaded")
+            
+        # Set weights (default to equal weights if not provided)
+        if weights is None:
+            self.weights = [1.0 / len(self.models)] * len(self.models)
+        else:
+            if len(weights) != len(self.models):
+                raise ValueError(f"Number of weights ({len(weights)}) must match number of models ({len(self.models)})")
+            # Normalize weights to sum to 1
+            total_weight = sum(weights)
+            self.weights = [w / total_weight for w in weights]
+        
+        print(f"Successfully loaded {len(self.models)} models with weights: {self.weights}")
 
     def predict_single(self, text: str) -> Dict[str, Union[str, float, List[float]]]:
         """
@@ -308,27 +343,45 @@ class EnsembleInferenceEngine:
             Dictionary containing the text, predicted class, predicted probability,
             and class probabilities
         """
+        if not text:
+            raise ValueError("Input text is empty")
+            
         # Get predictions from each model
         all_probabilities = []
         
-        for model, tokenizer in zip(self.models, self.tokenizers):
-            # Tokenize input
-            inputs = tokenizer(
-                text,
-                truncation=True,
-                padding=True,
-                max_length=self.max_length,
-                return_tensors="pt",
-            )
-            
-            # Move inputs to device
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
-            
-            # Get predictions
-            with torch.no_grad():
-                outputs = model(**inputs)
-                probabilities = torch.softmax(outputs.logits, dim=1)
-                all_probabilities.append(probabilities[0].cpu().numpy())
+        for i, (model, tokenizer) in enumerate(zip(self.models, self.tokenizers)):
+            try:
+                # Tokenize input
+                inputs = tokenizer(
+                    text,
+                    truncation=True,
+                    padding=True,
+                    max_length=self.max_length,
+                    return_tensors="pt",
+                )
+                
+                # Move inputs to device
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                
+                # Get predictions
+                with torch.no_grad():
+                    outputs = model(**inputs)
+                    probabilities = torch.softmax(outputs.logits, dim=1)
+                    all_probabilities.append(probabilities[0].cpu().numpy())
+            except Exception as e:
+                print(f"Error processing model {i+1}: {str(e)}")
+                continue
+        
+        if not all_probabilities:
+            # Handle the case where no models produced valid probabilities
+            print("No valid predictions from any model. Returning default predictions.")
+            num_classes = 2  # Default to binary classification
+            return {
+                "text": text,
+                "predicted_class": 0,
+                "predicted_probability": 1.0/num_classes,
+                "class_probabilities": [1.0/num_classes] * num_classes,
+            }
         
         # Weighted average of probabilities
         weighted_probs = np.zeros_like(all_probabilities[0])
@@ -359,29 +412,41 @@ class EnsembleInferenceEngine:
         Returns:
             List of dictionaries containing predictions for each text
         """
-        predictions = []
+        if not texts:
+            raise ValueError("Input texts list is empty")
+            
+        if not self.models or not self.tokenizers:
+            raise ValueError("No models or tokenizers available in the ensemble")
+            
+        print(f"Processing {len(texts)} texts with {len(self.models)} models")
         
-        # Create batches with tqdm progress bar if enabled
+        # Process in batches
+        predictions = []
         num_batches = (len(texts) + batch_size - 1) // batch_size
-        batches = range(0, len(texts), batch_size)
         
         # Use tqdm for progress tracking if enabled
         if self.show_progress:
             from tqdm import tqdm
-            batches = tqdm(batches, total=num_batches, desc="Processing batches", unit="batch")
-
-        # Process in batches
+            batches = tqdm(range(0, len(texts), batch_size), total=num_batches, desc="Processing batches")
+        else:
+            batches = range(0, len(texts), batch_size)
+        
         for i in batches:
             batch_texts = texts[i:i + batch_size]
-            batch_size = len(batch_texts)
+            batch_predictions = self._process_batch(batch_texts)
+            predictions.extend(batch_predictions)
             
-            # Get predictions from all models
-            all_probabilities = []
-            
-            for model, tokenizer in zip(self.models, self.tokenizers):
-                # Tokenize batch
+        return predictions
+
+    def _process_batch(self, texts: List[str]) -> List[Dict[str, Union[str, float, List[float]]]]:
+        """Process a single batch of texts."""
+        all_probabilities = []
+        
+        for i, (model, tokenizer) in enumerate(zip(self.models, self.tokenizers)):
+            try:
+                # Tokenize inputs
                 inputs = tokenizer(
-                    batch_texts,
+                    texts,
                     truncation=True,
                     padding=True,
                     max_length=self.max_length,
@@ -396,31 +461,52 @@ class EnsembleInferenceEngine:
                     outputs = model(**inputs)
                     probabilities = torch.softmax(outputs.logits, dim=1)
                     all_probabilities.append(probabilities.cpu().numpy())
-            
-            # Compute weighted average of probabilities
-            weighted_probabilities = np.zeros_like(all_probabilities[0])
-            for w, p in zip(self.weights, all_probabilities):
-                weighted_probabilities += w * p
-            
-            # Get predicted classes and probabilities
-            predicted_classes = np.argmax(weighted_probabilities, axis=1)
-            predicted_probs = np.array([
-                weighted_probabilities[i, predicted_classes[i]] 
-                for i in range(batch_size)
-            ])
-            
-            # Convert to list of dictionaries
-            for j, (text, pred_class, pred_prob) in enumerate(
-                zip(batch_texts, predicted_classes, predicted_probs)
-            ):
-                predictions.append(
-                    {
-                        "text": text,
-                        "predicted_class": int(pred_class),
-                        "predicted_probability": float(pred_prob),
-                        "class_probabilities": weighted_probabilities[j].tolist(),
-                    }
-                )
+            except Exception as e:
+                print(f"Error processing model {i+1}: {str(e)}")
+                continue
+        
+        if not all_probabilities:
+            # Handle the case where no models produced valid probabilities
+            print("No valid predictions from any model. Returning default predictions.")
+            num_classes = 2  # Default to binary classification
+            predictions = []
+            for text in texts:
+                predictions.append({
+                    "text": text,
+                    "predicted_class": 0,
+                    "predicted_probability": 1.0/num_classes,
+                    "class_probabilities": [1.0/num_classes] * num_classes,
+                })
+            return predictions
+        
+        # Stack and average probabilities across models
+        num_examples = len(texts)
+        num_classes = all_probabilities[0].shape[1]
+        weighted_probabilities = np.zeros((num_examples, num_classes))
+        
+        for i, probs in enumerate(all_probabilities):
+            weighted_probabilities += probs * self.weights[i]
+        
+        # Get predicted classes and probabilities
+        predicted_classes = np.argmax(weighted_probabilities, axis=1)
+        predicted_probs = np.array([
+            weighted_probabilities[j, predicted_classes[j]] 
+            for j in range(len(texts))
+        ])
+        
+        # Convert to list of dictionaries
+        predictions = []
+        for j, (text, pred_class, pred_prob) in enumerate(
+            zip(texts, predicted_classes, predicted_probs)
+        ):
+            predictions.append(
+                {
+                    "text": text,
+                    "predicted_class": int(pred_class),
+                    "predicted_probability": float(pred_prob),
+                    "class_probabilities": weighted_probabilities[j].tolist(),
+                }
+            )
         
         return predictions
 

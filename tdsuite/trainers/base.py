@@ -173,7 +173,8 @@ class BaseTrainer:
             self.tracker = EmissionsTracker(
                 output_dir=emissions_dir,
                 project_name="training",
-                output_file="training_emissions.csv"
+                output_file="training_emissions.csv",
+                allow_multiple_runs=True
             )
             
             # Start tracking
