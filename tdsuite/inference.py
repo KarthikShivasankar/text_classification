@@ -3,12 +3,10 @@
 Script for performing inference with trained technical debt classification models.
 """
 
-import argparse
 import json
 import os
 from typing import Dict, List, Optional, Union, Any
 from datetime import datetime
-from tqdm import tqdm  # Import tqdm for progress bars
 
 # Disable oneDNN warning
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
@@ -17,37 +15,13 @@ import pandas as pd
 import torch
 from codecarbon import EmissionsTracker  # Import EmissionsTracker
 
-from tdsuite.utils import InferenceEngine, EnsembleInferenceEngine
+from tdsuite.utils import InferenceEngine, EnsembleInferenceEngine, OnnxInferenceEngine
+from tdsuite.cli import get_inference_parser
 
 
 def parse_args():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Inference for technical debt classification")
-    
-    # Model arguments
-    model_group = parser.add_mutually_exclusive_group(required=True)
-    model_group.add_argument("--model_path", type=str, help="Path to a local model")
-    model_group.add_argument("--model_name", type=str, help="Name of a model on Hugging Face")
-    model_group.add_argument("--model_paths", type=str, nargs="+", help="Paths to multiple local models")
-    model_group.add_argument("--model_names", type=str, nargs="+", help="Names of multiple models on Hugging Face")
-    
-    # Input arguments
-    input_group = parser.add_mutually_exclusive_group(required=True)
-    input_group.add_argument("--text", type=str, help="Text to classify")
-    input_group.add_argument("--input_file", type=str, help="Path to a file with texts (CSV or JSON)")
-    
-    # Output arguments
-    parser.add_argument("--output_file", type=str, help="Path to save predictions")
-    parser.add_argument("--results_dir", type=str, help="Directory to store inference results and metrics")
-    parser.add_argument("--text_column", type=str, default="text", help="Name of the text column in the input file")
-    parser.add_argument("--max_length", type=int, default=512, help="Maximum sequence length")
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for inference")
-    parser.add_argument("--device", type=str, default="cuda", help="Device to use for inference (cuda, cpu)")
-    parser.add_argument("--weights", type=float, nargs="+", help="Weights for ensemble models")
-    parser.add_argument("--track_emissions", type=bool, default=True, help="Whether to track carbon emissions")
-    parser.add_argument("--disable_progress_bar", action="store_true", help="Disable progress bar during inference")
-    
-    return parser.parse_args()
+    return get_inference_parser().parse_args()
 
 
 def main():
@@ -105,15 +79,23 @@ def main():
     print("📊 Emissions tracking started for inference")
     
     try:
+        # ONNX path: CPU inference, no GPU needed
+        if args.onnx_path:
+            print(f"Using ONNX inference engine (CPU): {args.onnx_path}")
+            engine = OnnxInferenceEngine(
+                onnx_path=args.onnx_path,
+                max_length=args.max_length,
+                show_progress=not args.disable_progress_bar,
+            )
         # Check if using ensemble
-        if args.model_paths or args.model_names:
+        elif args.model_paths or args.model_names:
             print("Creating ensemble inference engine")
             # Validate weights if provided
             if args.weights:
                 num_models = max(len(args.model_paths or []), len(args.model_names or []))
                 if len(args.weights) != num_models:
                     raise ValueError(f"Number of weights ({len(args.weights)}) must match number of models ({num_models})")
-            
+
             # Create ensemble inference engine
             engine = EnsembleInferenceEngine(
                 model_paths=args.model_paths,

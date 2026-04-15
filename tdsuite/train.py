@@ -13,11 +13,10 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-import argparse
 import json
 import pandas as pd
 import torch
-from transformers import TrainingArguments, AutoTokenizer
+from transformers import AutoModelForSequenceClassification, AutoTokenizer, TrainingArguments
 from sklearn.utils.class_weight import compute_class_weight
 import numpy as np
 from typing import Optional, List, Dict, Any
@@ -26,63 +25,12 @@ from sklearn.model_selection import train_test_split
 from tdsuite.models.transformer import TransformerModel
 from tdsuite.data.dataset import TDDataset, TDProcessor, BinaryTDProcessor
 from tdsuite.trainers import TDTrainer
-from tdsuite.config.config import Config, ModelConfig, TrainingConfig, DataConfig
-from transformers import AutoModelForSequenceClassification
+from tdsuite.cli import get_train_parser
 
 
 def parse_args():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Train a technical debt classification model")
-    
-    # Data arguments
-    parser.add_argument("--data_file", type=str, required=True,
-                      help="Path to data file or Hugging Face dataset name")
-    parser.add_argument("--text_column", type=str, default="text",
-                      help="Name of the text column")
-    parser.add_argument("--label_column", type=str, default="label",
-                      help="Name of the label column")
-    parser.add_argument("--is_huggingface_dataset", action="store_true",
-                      help="Whether the data is a Hugging Face dataset")
-    parser.add_argument("--numeric_labels", action="store_true",
-                      help="Whether the labels are already numeric (0 or 1)")
-    parser.add_argument("--positive_category", type=str,
-                      help="Positive category for binary classification")
-    
-    # Model arguments
-    parser.add_argument("--model_name", type=str, required=True,
-                      help="Name of the model to use")
-    parser.add_argument("--max_length", type=int, default=512,
-                      help="Maximum sequence length")
-    
-    # Training arguments
-    parser.add_argument("--output_dir", type=str, required=True,
-                      help="Directory to save the model and outputs")
-    parser.add_argument("--num_epochs", type=int, default=3,
-                      help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=16,
-                      help="Batch size")
-    parser.add_argument("--learning_rate", type=float, default=2e-5,
-                      help="Learning rate")
-    parser.add_argument("--weight_decay", type=float, default=0.01,
-                      help="Weight decay")
-    parser.add_argument("--warmup_steps", type=int, default=500,
-                      help="Number of warmup steps")
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=1,
-                      help="Number of gradient accumulation steps")
-    
-    # Cross-validation arguments
-    parser.add_argument("--cross_validation", action="store_true",
-                      help="Whether to use cross-validation")
-    parser.add_argument("--n_splits", type=int, default=5,
-                      help="Number of splits for cross-validation")
-    
-    # Additional arguments
-    parser.add_argument("--seed", type=int, default=42,
-                      help="Random seed")
-    parser.add_argument("--device", type=str, default=None,
-                      help="Device to use (cuda, cpu, or None for auto-detection)")
-    
-    return parser.parse_args()
+    return get_train_parser().parse_args()
 
 
 def main():
@@ -91,9 +39,18 @@ def main():
     
     # Check for GPU availability
     if not torch.cuda.is_available():
-        raise RuntimeError("No GPU available. This model requires a GPU to run.")
-    device = torch.device("cuda")
-    print(f"Using GPU: {torch.cuda.get_device_name(0)}")
+        print(
+            "WARNING: No GPU detected. Training will be very slow on CPU and is not recommended.\n"
+            "If you only need inference on CPU, export a pre-trained model to ONNX instead:\n"
+            "  python scripts/export_onnx.py "
+            "--model_name karths/binary_classification_train_TD --output model.onnx\n"
+            "  tdsuite-inference --onnx_path model.onnx --input_file data.csv\n"
+            "Proceeding with CPU training..."
+        )
+        device = torch.device("cpu")
+    else:
+        device = torch.device("cuda")
+        print(f"Using GPU: {torch.cuda.get_device_name(0)}")
     
     # Set random seed
     torch.manual_seed(args.seed)

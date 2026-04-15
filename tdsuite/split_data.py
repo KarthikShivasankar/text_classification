@@ -1,27 +1,14 @@
 #!/usr/bin/env python
 """Script to split and save data for technical debt classification."""
 
-import argparse
 import os
 from tdsuite.data.data_splitter import split_data
+from tdsuite.cli import get_split_data_parser
 
 
 def main():
     """Main function."""
-    parser = argparse.ArgumentParser(description="Split and save data for technical debt classification.")
-    
-    # Required arguments
-    parser.add_argument("--data_file", type=str, required=True, help="Path to the data file or Hugging Face dataset name")
-    parser.add_argument("--output_dir", type=str, required=True, help="Directory to save the split data")
-    
-    # Optional arguments
-    parser.add_argument("--test_size", type=float, default=0.2, help="Proportion of the dataset to include in the test split")
-    parser.add_argument("--random_state", type=int, default=42, help="Random state for reproducibility")
-    parser.add_argument("--repo_column", type=str, default=None, help="Name of the column containing the repository information")
-    parser.add_argument("--is_huggingface_dataset", action="store_true", help="Whether the data file is a Hugging Face dataset")
-    parser.add_argument("--is_numeric_labels", action="store_true", help="Whether the labels are numeric (0/1) or categorical")
-    
-    args = parser.parse_args()
+    args = get_split_data_parser().parse_args()
     
     # Split and save the data
     train_df, test_df, top_repo_df = split_data(
