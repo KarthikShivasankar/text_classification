@@ -1,4 +1,4 @@
-"""ONNX-based inference engine for CPU deployment without a GPU."""
+"""ONNX-based inference engine — CPU (default) and GPU via CUDAExecutionProvider."""
 
 import os
 import sys
@@ -18,23 +18,29 @@ def _require_onnxruntime():
         print(
             "Error: 'onnxruntime' is not installed.\n"
             "Install it with:\n"
-            "  uv pip install onnx onnxruntime\n"
-            "  # or: pip install onnx onnxruntime",
+            "  pip install onnxruntime          # CPU\n"
+            "  pip install onnxruntime-gpu      # GPU (CUDA)\n"
+            "  # or via tdsuite extras:\n"
+            "  pip install 'tdsuite[onnx]'      # CPU\n"
+            "  pip install 'tdsuite[gpu]'       # GPU",
             file=sys.stderr,
         )
         sys.exit(1)
 
 
 class OnnxInferenceEngine:
-    """Inference engine that runs a tdsuite model exported to ONNX on CPU.
+    """Inference engine that runs a tdsuite model exported to ONNX.
 
-    Produces the same output format as InferenceEngine so it is a drop-in
-    replacement for CPU environments without a GPU.
+    Supports CPU (default) and GPU via CUDAExecutionProvider (requires
+    onnxruntime-gpu).  This is the recommended inference path — no PyTorch
+    required.
 
-    Usage:
-        engine = OnnxInferenceEngine(onnx_path="model.onnx")
-        result = engine.predict_single("This code has serious design flaws")
-        df = engine.predict_from_file("issue_texts.csv", output_file="preds.csv")
+    Load from a local .onnx file:
+        engine = OnnxInferenceEngine("model.onnx")
+
+    Auto-download from Hugging Face Hub:
+        engine = OnnxInferenceEngine.from_pretrained("karths/binary_classification_train_TD")
+        engine = OnnxInferenceEngine.from_pretrained("karths/binary_classification_train_TD", device="cuda")
     """
 
     def __init__(
@@ -43,14 +49,17 @@ class OnnxInferenceEngine:
         tokenizer_path: Optional[str] = None,
         max_length: int = 512,
         show_progress: bool = True,
+        device: str = "cpu",
     ):
         """
         Args:
             onnx_path: Path to the .onnx model file.
-            tokenizer_path: Directory containing the tokenizer files.
-                Defaults to the directory of onnx_path.
+            tokenizer_path: Local directory or Hugging Face model ID for the
+                tokenizer.  Defaults to the directory containing onnx_path.
             max_length: Maximum token sequence length.
             show_progress: Whether to show tqdm progress bars.
+            device: ``"cpu"`` (default) or ``"cuda"`` for GPU inference.
+                GPU requires ``onnxruntime-gpu`` to be installed.
         """
         ort = _require_onnxruntime()
 
@@ -60,29 +69,94 @@ class OnnxInferenceEngine:
         self.onnx_path = onnx_path
         self.max_length = max_length
         self.show_progress = show_progress
+        self.device = device.lower()
 
-        # Tokenizer lives next to the .onnx file by default (saved there by export_onnx.py)
-        tok_dir = tokenizer_path or os.path.dirname(os.path.abspath(onnx_path))
-        self.tokenizer = self._load_tokenizer(tok_dir)
+        tok_source = tokenizer_path or os.path.dirname(os.path.abspath(onnx_path))
+        self.tokenizer = self._load_tokenizer(tok_source)
 
-        # Create ONNX Runtime session — uses all available CPU threads by default
+        # Build provider list based on device
+        if self.device == "cuda":
+            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        else:
+            providers = ["CPUExecutionProvider"]
+
         sess_opts = ort.SessionOptions()
         sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
         self.session = ort.InferenceSession(
             onnx_path,
             sess_options=sess_opts,
-            providers=["CPUExecutionProvider"],
+            providers=providers,
         )
+
+        # Warn if CUDA was requested but fell back to CPU
+        active = self.session.get_providers()
+        if self.device == "cuda" and "CUDAExecutionProvider" not in active:
+            print(
+                "Warning: CUDAExecutionProvider not available — running on CPU.\n"
+                "Install onnxruntime-gpu for GPU support: pip install onnxruntime-gpu",
+                file=sys.stderr,
+            )
+
         self._input_names = [inp.name for inp in self.session.get_inputs()]
+
+    # ------------------------------------------------------------------
+    # Class-method constructor
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        model_id: str,
+        device: str = "cpu",
+        max_length: int = 512,
+        show_progress: bool = True,
+        token: Optional[str] = None,
+    ) -> "OnnxInferenceEngine":
+        """Download ``model.onnx`` from a Hugging Face Hub repository and load it.
+
+        Args:
+            model_id: Hugging Face model ID, e.g.
+                ``"karths/binary_classification_train_TD"``.
+            device: ``"cpu"`` (default) or ``"cuda"`` for GPU inference.
+            max_length: Maximum token sequence length.
+            show_progress: Whether to show tqdm progress bars.
+            token: Optional Hugging Face API token for private repos.
+
+        Returns:
+            Loaded :class:`OnnxInferenceEngine` instance.
+        """
+        try:
+            from huggingface_hub import hf_hub_download
+        except ImportError:
+            print(
+                "Error: 'huggingface_hub' is not installed.\n"
+                "Install with: pip install huggingface-hub",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        print(f"Downloading model.onnx from {model_id} …")
+        onnx_path = hf_hub_download(
+            repo_id=model_id,
+            filename="model.onnx",
+            token=token,
+        )
+        return cls(
+            onnx_path=onnx_path,
+            tokenizer_path=model_id,  # AutoTokenizer handles HF Hub download
+            max_length=max_length,
+            show_progress=show_progress,
+            device=device,
+        )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
     def _load_tokenizer(self, tokenizer_path: str):
         from transformers import AutoTokenizer
 
-        if not os.path.isdir(tokenizer_path):
-            raise FileNotFoundError(
-                f"Tokenizer directory not found: {tokenizer_path}\n"
-                f"Re-run export_onnx.py — it saves the tokenizer alongside the .onnx file."
-            )
         return AutoTokenizer.from_pretrained(tokenizer_path)
 
     def _tokenize(self, texts: Union[str, List[str]]) -> Dict[str, np.ndarray]:
@@ -95,14 +169,16 @@ class OnnxInferenceEngine:
             max_length=self.max_length,
             return_tensors="np",
         )
-        # Keep only the inputs the ONNX model actually expects
         return {k: enc[k] for k in self._input_names if k in enc}
 
     def _run_session(self, inputs: Dict[str, np.ndarray]) -> np.ndarray:
-        logits = self.session.run(None, inputs)[0]  # shape (batch, num_labels)
-        # Softmax
+        logits = self.session.run(None, inputs)[0]  # (batch, num_labels)
         exp_logits = np.exp(logits - logits.max(axis=1, keepdims=True))
         return exp_logits / exp_logits.sum(axis=1, keepdims=True)
+
+    # ------------------------------------------------------------------
+    # Public API (drop-in for InferenceEngine)
+    # ------------------------------------------------------------------
 
     def predict_single(self, text: str) -> Dict[str, Union[str, float, List[float]]]:
         """Predict the class for a single text string."""
@@ -121,8 +197,8 @@ class OnnxInferenceEngine:
     ) -> List[Dict[str, Union[str, float, List[float]]]]:
         """Predict classes for a list of texts."""
         predictions = []
-        batches = range(0, len(texts), batch_size)
         num_batches = (len(texts) + batch_size - 1) // batch_size
+        batches = range(0, len(texts), batch_size)
         if self.show_progress:
             batches = tqdm(batches, total=num_batches, desc="ONNX inference", unit="batch")
 
@@ -158,8 +234,8 @@ class OnnxInferenceEngine:
             batch_size: Batch size.
 
         Returns:
-            DataFrame with original columns plus 'predicted_class',
-            'predicted_probability', and 'class_probabilities'.
+            DataFrame with original columns plus ``predicted_class``,
+            ``predicted_probability``, and ``class_probabilities``.
         """
         ext = os.path.splitext(input_file)[1].lower()
         if ext == ".csv":

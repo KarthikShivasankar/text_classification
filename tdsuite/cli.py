@@ -171,8 +171,19 @@ def get_inference_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help=(
-            "Path to an ONNX model file for CPU inference (no GPU required). "
-            "Export a model first with: python scripts/export_onnx.py"
+            "Path to a local .onnx model file. "
+            "If omitted, model.onnx is auto-downloaded from Hugging Face Hub when "
+            "--model_name is supplied. "
+            "Export your own ONNX model with: python scripts/export_onnx.py"
+        ),
+    )
+    parser.add_argument(
+        "--use_torch",
+        action="store_true",
+        help=(
+            "Force PyTorch-based inference instead of the default ONNX backend. "
+            "Requires torch to be installed (pip install 'tdsuite[gpu]'). "
+            "Use this for ensemble inference or when ONNX is not available."
         ),
     )
 

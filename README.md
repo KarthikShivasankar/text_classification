@@ -42,13 +42,6 @@ A suite for detecting and classifying **technical debt** in software repositorie
 
 ---
 
-## What is Technical Debt?
-
-Technical debt is the accumulated cost of shortcuts, poor design decisions, and deferred maintenance in a software project. Left unmanaged it slows delivery, increases defect rates, and makes the codebase harder to evolve.
-
-TD-Classifier Suite helps teams **find technical debt automatically** by classifying free-form text — issue bodies, commit messages, code review comments, pull request descriptions — against 18 TD categories using fine-tuned transformer models.
-
----
 
 ## Use Cases
 
@@ -67,7 +60,7 @@ TD-Classifier Suite helps teams **find technical debt automatically** by classif
 
 - **18 TD categories** — general TD, architecture, code quality, security, performance, defects, infrastructure, requirements, design, usability, compatibility, reliability, process, build, maintenance, automation, people, portability
 - **17 pre-trained models** on Hugging Face Hub — zero training required for inference
-- **CPU inference via ONNX** — export any model once, run everywhere without a GPU
+- **ONNX-first inference** — CPU by default, no PyTorch required; all 17 models ship `model.onnx` on Hugging Face Hub — auto-downloaded on first use
 - **GitHub issues pipeline** — fetch → clean → classify in three commands
 - **Custom training** — fine-tune on your own data with cross-validation, class weighting, and early stopping
 - **Ensemble inference** — combine multiple category models with custom weights
@@ -77,6 +70,8 @@ TD-Classifier Suite helps teams **find technical debt automatically** by classif
 ---
 
 ## Installation
+
+> **Default backend is ONNX (CPU).** PyTorch and CUDA are optional extras — only needed for training or explicit GPU inference.
 
 ### With UV (recommended)
 
@@ -94,11 +89,12 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 git clone https://github.com/KarthikShivasankar/text_classification
 cd text_classification
 
-uv venv                                  # create .venv/
-uv pip install -e .                      # runtime dependencies
-uv pip install -e ".[onnx]"              # + onnx, onnxruntime (for CPU inference)
-uv pip install -e ".[dev]"               # + black, isort, flake8
-uv pip install -r test-requirements.txt  # + pytest, pytest-cov
+uv venv                        # create .venv/
+uv pip install -e .            # CPU inference (ONNX) — no GPU / PyTorch required
+uv pip install -e ".[gpu]"     # + GPU inference via onnxruntime-gpu + torch (CUDA 12.4)
+uv pip install -e ".[train]"   # + full training stack (torch, codecarbon, evaluate…)
+uv pip install -e ".[onnx]"    # + onnx package for exporting your own models
+uv pip install -e ".[dev]"     # + black, isort, flake8
 ```
 
 > After `uv venv`, set your IDE's Python interpreter to `.venv/Scripts/python.exe` (Windows) or `.venv/bin/python` (Linux/Mac) so imports resolve correctly.
@@ -108,20 +104,20 @@ uv pip install -r test-requirements.txt  # + pytest, pytest-cov
 ```bash
 git clone https://github.com/KarthikShivasankar/text_classification
 cd text_classification
-pip install -e .
-pip install -e ".[onnx,dev,test]"   # all optional groups at once
+pip install -e .                       # CPU inference — no GPU needed
+pip install -e ".[gpu,dev,test]"       # GPU + dev + test extras
 ```
 
 ### CPU-only (no GPU, inference only)
 
-If you have no GPU and only need to run inference on existing models:
+The default `pip install -e .` already gives you full CPU inference via ONNX. No additional steps required — `model.onnx` is auto-downloaded from Hugging Face Hub the first time you run inference:
 
 ```bash
-uv venv
-uv pip install transformers tokenizers tqdm pandas requests numpy onnxruntime onnx
+pip install -e .
+# Run inference directly — model.onnx downloads automatically on first use
+tdsuite-inference --model_name karths/binary_classification_train_TD \
+    --text "The auth module has no rate limiting"
 ```
-
-Then skip training entirely — export a pre-trained model from Hugging Face to ONNX and run it locally. See [Use Case 4](#use-case-4--run-without-a-gpu).
 
 ### Publishing to PyPI
 
@@ -135,12 +131,12 @@ twine upload dist/*
 
 ## Quick Start
 
-**Classify issues from a public GitHub repo in under 5 minutes:**
+**Classify issues from a public GitHub repo in under 5 minutes — no GPU needed:**
 
 ```bash
-# Install
+# Install (CPU-only, no PyTorch required)
 git clone https://github.com/KarthikShivasankar/text_classification && cd text_classification
-uv venv && uv pip install -e ".[onnx]"
+uv venv && uv pip install -e .
 
 # Fetch the 100 most recent issues
 python scripts/fetch_github_issues.py --repo microsoft/vscode --output issues.csv
@@ -148,16 +144,22 @@ python scripts/fetch_github_issues.py --repo microsoft/vscode --output issues.cs
 # Extract the body text
 python scripts/extract_issue_bodies.py --input issues.csv --output issue_texts.csv --min-length 50
 
-# Export the pre-trained model to ONNX (one-time, runs on CPU)
-python scripts/export_onnx.py \
+# Classify — model.onnx is auto-downloaded from Hugging Face Hub on first run
+tdsuite-inference \
     --model_name karths/binary_classification_train_TD \
-    --output models/td.onnx
-
-# Classify
-tdsuite-inference --onnx_path models/td.onnx --input_file issue_texts.csv
+    --input_file issue_texts.csv
 ```
 
 Results land in a timestamped folder: `outputs/.../inference_YYYYMMDD_HHMMSS/predictions_issue_texts.csv`
+
+**GPU inference** (requires `pip install -e ".[gpu]"`):
+
+```bash
+tdsuite-inference \
+    --model_name karths/binary_classification_train_TD \
+    --device cuda \
+    --input_file issue_texts.csv
+```
 
 ---
 
@@ -191,16 +193,16 @@ python scripts/extract_issue_bodies.py \
     --drop-duplicates \
     --keep-metadata        # also keep 'number' and 'title' columns for traceability
 
-# Step 3: classify with a pre-trained model (GPU)
+# Step 3: classify — ONNX CPU by default, model.onnx auto-downloads from HF Hub
 tdsuite-inference \
     --model_name karths/binary_classification_train_TD \
     --input_file issue_texts.csv
 
-# Step 3 (CPU alternative — export once, reuse)
-python scripts/export_onnx.py \
+# Step 3 (GPU): requires pip install 'tdsuite[gpu]'
+tdsuite-inference \
     --model_name karths/binary_classification_train_TD \
-    --output models/td.onnx
-tdsuite-inference --onnx_path models/td.onnx --input_file issue_texts.csv
+    --device cuda \
+    --input_file issue_texts.csv
 ```
 
 The output CSV has one row per issue with `predicted_class` (0/1) and `predicted_probability`. If you used `--keep-metadata` the `number` and `title` columns let you trace results directly back to GitHub issues.
@@ -326,39 +328,38 @@ tdsuite-inference \
 
 ### Use Case 4 — Run without a GPU
 
-All inference can run on CPU using ONNX Runtime. No code changes — just a one-time export step.
+CPU inference is the **default** — no GPU, no PyTorch, no extra steps. All 21 pre-trained models ship a `model.onnx` file on Hugging Face Hub that downloads automatically on the first inference call.
 
-**Step 1 — Install ONNX dependencies**
+**Install (CPU — no GPU required)**
 
 ```bash
-uv pip install -e ".[onnx]"
-# or: pip install onnx onnxruntime
+pip install -e .   # onnxruntime is included; torch is NOT required
 ```
 
-**Step 2 — Export a model (one-time)**
+**Classify on CPU — model downloads automatically**
 
 ```bash
-# Use a pre-trained model from Hugging Face (no training needed)
-python scripts/export_onnx.py \
+# Batch file — model.onnx auto-downloaded from HF Hub on first run
+tdsuite-inference \
     --model_name karths/binary_classification_train_TD \
-    --output models/td.onnx
+    --input_file issue_texts.csv
 
-# Or export your own fine-tuned model
+# Single string
+tdsuite-inference \
+    --model_name karths/binary_classification_train_TD \
+    --text "No tests exist for this module"
+```
+
+**Use a local ONNX file (offline / custom model)**
+
+```bash
+# Export your own fine-tuned model once (requires pip install 'tdsuite[onnx]')
 python scripts/export_onnx.py \
     --model_path outputs/my_model \
     --output models/my_model.onnx
-```
 
-This saves `td.onnx` and the tokenizer files in `models/`. The export is a one-time operation — the resulting file can be deployed anywhere.
-
-**Step 3 — Classify on CPU**
-
-```bash
-# Batch file
-tdsuite-inference --onnx_path models/td.onnx --input_file issue_texts.csv
-
-# Single string
-tdsuite-inference --onnx_path models/td.onnx --text "No tests exist for this module"
+# Then run offline
+tdsuite-inference --onnx_path models/my_model.onnx --input_file issue_texts.csv
 ```
 
 ONNX Runtime is typically **2–4× faster** than PyTorch on CPU and has no dependency on CUDA or torch.
@@ -537,47 +538,52 @@ tdsuite-train \
 
 ### `tdsuite-inference`
 
-Run predictions on a file or a single string using a trained, pre-trained, or ONNX model.
+Run predictions on a file or a single string. Defaults to **ONNX on CPU** — PyTorch is not required.
 
 ```bash
-# Single model, batch file
+# CPU inference (default) — model.onnx auto-downloaded from HF Hub
 tdsuite-inference --model_name karths/binary_classification_train_TD --input_file issues.csv
 
-# Single model, single string
+# Single string
 tdsuite-inference --model_name karths/binary_classification_train_TD \
     --text "No input validation on this endpoint"
 
-# Local model checkpoint
-tdsuite-inference --model_path outputs/my_model --input_file issues.csv
+# GPU inference — ONNX with CUDAExecutionProvider (requires pip install 'tdsuite[gpu]')
+tdsuite-inference --model_name karths/binary_classification_train_TD \
+    --device cuda --input_file issues.csv
 
-# ONNX model (CPU, no GPU required)
+# Local ONNX file (offline)
 tdsuite-inference --onnx_path models/td.onnx --input_file issues.csv
 
-# Ensemble
+# Local model checkpoint (PyTorch, requires --use_torch)
+tdsuite-inference --model_path outputs/my_model --use_torch --input_file issues.csv
+
+# Ensemble (uses PyTorch backend automatically)
 tdsuite-inference \
     --model_names karths/binary_classification_train_TD karths/binary_classification_train_secu \
     --input_file issues.csv \
     --weights 0.6 0.4
 ```
 
-| Argument | Description |
-|----------|-------------|
-| `--model_path` | Local model directory |
-| `--model_name` | HF model name |
-| `--model_paths` | Multiple local directories (ensemble) |
-| `--model_names` | Multiple HF model names (ensemble) |
-| `--onnx_path` | Path to `.onnx` file for CPU inference |
-| `--text` | Single text string to classify |
-| `--input_file` | CSV or JSON file to classify |
-| `--text_column` | Column containing text (default: `text`) |
-| `--output_file` | Path to save the predictions CSV |
-| `--results_dir` | Custom results directory (default: timestamped subfolder) |
-| `--batch_size` | Inference batch size (default: `32`) |
-| `--max_length` | Max token length (default: `512`) |
-| `--device` | `cuda` or `cpu` (default: `cuda`) |
-| `--weights` | Per-model weights for ensemble averaging |
-| `--disable_progress_bar` | Suppress tqdm bars |
-| `--track_emissions` | Record carbon emissions (default: `true`) |
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--model_path` | — | Local model directory (ONNX auto-detected; or use `--use_torch`) |
+| `--model_name` | — | HF model name — `model.onnx` downloaded automatically |
+| `--model_paths` | — | Multiple local directories (ensemble, PyTorch) |
+| `--model_names` | — | Multiple HF model names (ensemble, PyTorch) |
+| `--onnx_path` | — | Explicit path to a local `.onnx` file |
+| `--use_torch` | `false` | Force PyTorch backend (requires `pip install 'tdsuite[gpu]'`) |
+| `--text` | — | Single text string to classify |
+| `--input_file` | — | CSV or JSON file to classify |
+| `--text_column` | `text` | Column containing text |
+| `--output_file` | — | Path to save the predictions CSV |
+| `--results_dir` | — | Custom results directory (default: timestamped subfolder) |
+| `--batch_size` | `32` | Inference batch size |
+| `--max_length` | `512` | Max token length |
+| `--device` | `cpu` | `cpu` (ONNX CPU) or `cuda` (ONNX GPU via CUDAExecutionProvider) |
+| `--weights` | — | Per-model weights for ensemble averaging |
+| `--disable_progress_bar` | `false` | Suppress tqdm bars |
+| `--track_emissions` | `true` | Record carbon emissions via CodeCarbon |
 
 > `--onnx_path`, `--model_path`, `--model_name`, `--model_paths`, and `--model_names` are mutually exclusive.
 
@@ -585,16 +591,18 @@ tdsuite-inference \
 
 ### `export_onnx.py`
 
-Convert any transformer model to ONNX format for fast CPU inference.
+Export a custom or fine-tuned model to ONNX format. The 17 pre-trained models already have `model.onnx` on Hugging Face Hub — you only need this for your own fine-tuned models.
+
+> Requires: `pip install 'tdsuite[onnx]'` (adds `torch` + `onnx` + `onnxscript`)
 
 ```bash
-# From a local checkpoint
+# Export a local fine-tuned checkpoint
 python scripts/export_onnx.py --model_path outputs/my_model --output models/my_model.onnx
 
-# Directly from Hugging Face
+# Export directly from Hugging Face (e.g. your own model)
 python scripts/export_onnx.py \
-    --model_name karths/binary_classification_train_TD \
-    --output models/td.onnx
+    --model_name my-org/my-custom-td-model \
+    --output models/custom.onnx
 ```
 
 | Argument | Default | Description |
@@ -605,7 +613,7 @@ python scripts/export_onnx.py \
 | `--max_length` | `512` | Sequence length for the export dummy input |
 | `--opset` | `14` | ONNX opset version |
 
-The tokenizer is saved alongside the `.onnx` file automatically. The export is a one-time operation.
+The tokenizer is saved alongside the `.onnx` file automatically.
 
 ---
 
@@ -683,22 +691,15 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install tdsuite (CPU / ONNX only)
-        run: pip install -e ".[onnx]"
+      - name: Install tdsuite (CPU / ONNX — no GPU required)
+        run: pip install -e .
 
-      - name: Cache ONNX model
-        id: cache-model
+      - name: Cache downloaded ONNX model
         uses: actions/cache@v4
         with:
-          path: models/td.onnx
-          key: onnx-td-${{ hashFiles('pyproject.toml') }}
-
-      - name: Export ONNX model (first run only)
-        if: steps.cache-model.outputs.cache-hit != 'true'
-        run: |
-          python scripts/export_onnx.py \
-            --model_name karths/binary_classification_train_TD \
-            --output models/td.onnx
+          # HF Hub caches to ~/.cache/huggingface; cache it between runs
+          path: ~/.cache/huggingface
+          key: hf-onnx-td-v1
 
       - name: Write PR description to file
         env:
@@ -709,8 +710,9 @@ jobs:
       - name: Classify PR description
         id: classify
         run: |
+          # model.onnx auto-downloads from HF Hub on first run (cached above)
           result=$(tdsuite-inference \
-            --onnx_path models/td.onnx \
+            --model_name karths/binary_classification_train_TD \
             --text "$(cat /tmp/pr_text.txt)")
           echo "$result"
           # Fail if predicted_class == 1 (TD detected)
@@ -750,20 +752,14 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install tdsuite
-        run: pip install -e ".[onnx]"
+      - name: Install tdsuite (CPU / ONNX — no GPU required)
+        run: pip install -e .
 
-      - name: Cache ONNX model
+      - name: Cache HF Hub downloads
         uses: actions/cache@v4
         with:
-          path: models/td.onnx
-          key: onnx-td-v1
-
-      - name: Export model if not cached
-        run: |
-          [ -f models/td.onnx ] || python scripts/export_onnx.py \
-            --model_name karths/binary_classification_train_TD \
-            --output models/td.onnx
+          path: ~/.cache/huggingface
+          key: hf-onnx-td-v1
 
       - name: Fetch issues
         env:
@@ -784,10 +780,10 @@ jobs:
             --drop-duplicates \
             --keep-metadata
 
-      - name: Classify
+      - name: Classify (model.onnx auto-downloads from HF Hub)
         run: |
           tdsuite-inference \
-            --onnx_path models/td.onnx \
+            --model_name karths/binary_classification_train_TD \
             --input_file /tmp/issue_texts.csv \
             --output_file /tmp/td_predictions.csv
 
@@ -812,20 +808,16 @@ td-check:
   stage: test
   image: python:3.11-slim
   cache:
-    key: onnx-td-model
+    key: hf-onnx-td
     paths:
-      - .cache/onnx/
+      - ~/.cache/huggingface/
   before_script:
-    - pip install -e ".[onnx]" -q
-    - mkdir -p "$MODEL_CACHE"
-    - |
-      [ -f "$MODEL_CACHE/td.onnx" ] || python scripts/export_onnx.py \
-        --model_name karths/binary_classification_train_TD \
-        --output "$MODEL_CACHE/td.onnx"
+    - pip install -e . -q
   script:
     - |
+      # model.onnx auto-downloads from HF Hub (cached between runs)
       tdsuite-inference \
-        --onnx_path "$MODEL_CACHE/td.onnx" \
+        --model_name karths/binary_classification_train_TD \
         --text "$CI_MERGE_REQUEST_DESCRIPTION" \
         | python -c "
       import sys, json
@@ -847,27 +839,26 @@ td-check:
 For air-gapped or self-hosted environments, bake the ONNX model into your runner image so the download step is eliminated entirely.
 
 ```dockerfile
-# Dockerfile.runner
+# Dockerfile.runner — bake model.onnx into the image for offline / air-gapped use
 FROM python:3.11-slim
 
 WORKDIR /app
 COPY . .
-RUN pip install -e ".[onnx]" && \
-    python scripts/export_onnx.py \
-        --model_name karths/binary_classification_train_TD \
-        --output /app/models/td.onnx
+# Install tdsuite (CPU, no GPU), then pre-download model.onnx into the image
+RUN pip install -e . && \
+    python -c "from tdsuite.utils.onnx_inference import OnnxInferenceEngine; \
+               OnnxInferenceEngine.from_pretrained('karths/binary_classification_train_TD')"
 
-# Default entrypoint — override in CI to run tdsuite-inference directly
 ENTRYPOINT ["tdsuite-inference"]
 ```
 
 ```bash
-# Build once
+# Build once (model baked in — no network at runtime)
 docker build -f Dockerfile.runner -t tdsuite-runner:latest .
 
-# Use in any CI job (no network call at runtime)
+# Use in any CI job
 docker run --rm tdsuite-runner:latest \
-    --onnx_path /app/models/td.onnx \
+    --model_name karths/binary_classification_train_TD \
     --text "Hard-coded API keys in the config module"
 ```
 
@@ -875,8 +866,9 @@ docker run --rm tdsuite-runner:latest \
 
 | Concern | Recommendation |
 |---------|----------------|
-| Cold-start time | Cache `models/td.onnx` between runs — the file is ~250 MB |
-| No GPU available | Use `--onnx_path`; ONNX Runtime runs entirely on CPU |
+| Cold-start time | Cache `~/.cache/huggingface` between runs — model.onnx is ~250–500 MB |
+| No GPU available | Default ONNX backend runs entirely on CPU — no extra flags needed |
+| GPU available | Add `--device cuda` and install `pip install 'tdsuite[gpu]'` |
 | Blocking vs. warning | Set `sys.exit(0)` for informational-only checks |
 | Multiple TD categories | Add `--model_names` with category models to detect *which type* of TD |
 | Rate limits on issue fetch | Store `GITHUB_TOKEN` as a CI secret and pass via `--token` |
@@ -933,34 +925,35 @@ outputs/my_model/inference_YYYYMMDD_HHMMSS/
 ```
 text_classification/
 ├── scripts/
-│   ├── fetch_github_issues.py   # fetch issues from any public GitHub repo → CSV
-│   ├── extract_issue_bodies.py  # clean issue CSV → text column for inference
-│   └── export_onnx.py           # export a transformer model to ONNX for CPU inference
+│   ├── fetch_github_issues.py        # fetch issues from any public GitHub repo → CSV
+│   ├── extract_issue_bodies.py       # clean issue CSV → text column for inference
+│   ├── export_onnx.py                # export a single model to ONNX (one-time, needs torch)
+│   └── export_and_upload_onnx.py    # batch-export all 17 TDSuite models and upload to HF Hub
 ├── tdsuite/
-│   ├── cli.py                   # all argparse parsers (single source of truth)
-│   ├── train.py                 # tdsuite-train entry point
-│   ├── inference.py             # tdsuite-inference entry point
-│   ├── split_data.py            # tdsuite-split-data entry point
+│   ├── cli.py                        # all argparse parsers (single source of truth)
+│   ├── train.py                      # tdsuite-train entry point
+│   ├── inference.py                  # tdsuite-inference entry point (ONNX default)
+│   ├── split_data.py                 # tdsuite-split-data entry point
+│   ├── upload_to_hf.py               # upload a trained model to Hugging Face Hub
 │   ├── config/
-│   │   └── config.py            # ModelConfig, TrainingConfig, DataConfig, InferenceConfig
+│   │   └── config.py                 # ModelConfig, TrainingConfig, DataConfig, InferenceConfig
 │   ├── data/
-│   │   ├── dataset.py           # TDDataset, TDProcessor, BinaryTDProcessor
-│   │   └── data_splitter.py     # DataSplitter — balanced splits, top-repo extraction
+│   │   ├── dataset.py                # TDDataset, TDProcessor, BinaryTDProcessor
+│   │   └── data_splitter.py          # DataSplitter — balanced splits, top-repo extraction
 │   ├── models/
-│   │   ├── base.py              # BaseModel with weighted loss support
-│   │   └── transformer.py       # TransformerModel (load, predict, save)
+│   │   ├── base.py                   # BaseModel with weighted loss support
+│   │   └── transformer.py            # TransformerModel (load, predict, save)
 │   ├── trainers/
-│   │   ├── base.py              # WeightedLossTrainer, BaseTrainer (with emissions tracking)
-│   │   └── td_trainer.py        # TDTrainer — cross-validation, early stopping, ensemble
+│   │   ├── base.py                   # WeightedLossTrainer, BaseTrainer (emissions tracking)
+│   │   └── td_trainer.py             # TDTrainer — cross-validation, early stopping, ensemble
 │   └── utils/
-│       ├── inference.py         # InferenceEngine, EnsembleInferenceEngine (GPU/PyTorch)
-│       ├── onnx_inference.py    # OnnxInferenceEngine — CPU inference via ONNX Runtime
-│       ├── metrics.py           # compute_metrics, confusion matrix, ROC plots
-│       └── data_utils.py        # load_dataset, preprocess_text
-├── app.py                       # Gradio web UI (port 7077)
-├── pyproject.toml               # packaging, tool config (black/isort/pytest), optional deps
-├── requirements.txt             # runtime dependencies
-└── test-requirements.txt        # pytest, pytest-cov
+│       ├── onnx_inference.py         # OnnxInferenceEngine — default CPU/GPU inference (no torch)
+│       ├── inference.py              # InferenceEngine, EnsembleInferenceEngine (PyTorch)
+│       ├── metrics.py                # compute_metrics, confusion matrix, ROC plots
+│       └── data_utils.py             # load_dataset, preprocess_text
+├── app.py                            # Gradio web UI (port 7077)
+├── pyproject.toml                    # packaging, tool config, optional deps (gpu/train/onnx/dev)
+└── test-requirements.txt             # pytest, pytest-cov
 ```
 
 ---
