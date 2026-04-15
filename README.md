@@ -127,7 +127,7 @@ tdsuite-train \
     --output_dir "outputs/multiclass"
 ```
 
-# Using a Hugging Face dataset with text labels
+Using a Hugging Face dataset with text labels
 
 ```bash
 tdsuite-train \
