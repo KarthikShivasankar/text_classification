@@ -127,6 +127,16 @@ tdsuite-train \
     --output_dir "outputs/multiclass"
 ```
 
+# Using a Hugging Face dataset with text labels
+
+```bash
+tdsuite-train \
+    --data_file "karths/Multi_class_debt_types" \
+    --model_name "distilbert-base-uncased" \
+    --classification_type multi \
+    --categories "code" "documentation" "design" \
+    --output_dir "outputs/multiclass"
+```
 ### Inference
 
 #### Batch Inference
