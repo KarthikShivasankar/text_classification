@@ -13,7 +13,6 @@ if __name__ == "__main__":
         "tdsuite-train",
         "--data_file", "karths/binary-10IQR-TD",
         "--model_name", "distilbert-base-uncased",
-        "--classification_type", "binary",
         "--numeric_labels",
         "--output_dir", "outputs/binary"
     ]
