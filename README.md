@@ -1,4 +1,4 @@
-.v# TD-Classifier Suite
+# TD-Classifier Suite
 
 A suite for detecting and classifying **technical debt** in software repositories using transformer models. It covers 18 TD categories (architecture, security, performance, code quality, and more), ships 17 pre-trained models on Hugging Face, and works end-to-end from raw GitHub issues to structured predictions — with or without a GPU.
 
