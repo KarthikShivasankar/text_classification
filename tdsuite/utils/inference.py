@@ -1,9 +1,10 @@
 """Inference utilities for technical debt classification."""
 
-import argparse
 import json
 import os
 from typing import Dict, List, Optional, Union, Any, Tuple
+
+from tqdm import tqdm
 
 import numpy as np
 import pandas as pd
@@ -133,7 +134,6 @@ class InferenceEngine:
         
         # Use tqdm for progress tracking if enabled
         if self.show_progress:
-            from tqdm import tqdm
             batches = tqdm(batches, total=num_batches, desc="Processing batches", unit="batch")
 
         # Process in batches
@@ -426,7 +426,6 @@ class EnsembleInferenceEngine:
         
         # Use tqdm for progress tracking if enabled
         if self.show_progress:
-            from tqdm import tqdm
             batches = tqdm(range(0, len(texts), batch_size), total=num_batches, desc="Processing batches")
         else:
             batches = range(0, len(texts), batch_size)
@@ -582,55 +581,4 @@ class EnsembleInferenceEngine:
         return results_df
 
 
-def main():
-    """Main function for inference."""
-    parser = argparse.ArgumentParser(description="Inference for technical debt classification")
-    
-    # Model arguments
-    model_group = parser.add_mutually_exclusive_group(required=True)
-    model_group.add_argument("--model_path", type=str, help="Path to a local model")
-    model_group.add_argument("--model_name", type=str, help="Name of a model on Hugging Face")
-    model_group.add_argument("--model_paths", type=str, nargs="+", help="Paths to multiple local models")
-    model_group.add_argument("--model_names", type=str, nargs="+", help="Names of multiple models on Hugging Face")
-    
-    # Input arguments
-    input_group = parser.add_mutually_exclusive_group(required=True)
-    input_group.add_argument("--text", type=str, help="Text to classify")
-    input_group.add_argument("--input_file", type=str, help="Path to a file with texts (one per line)")
-    
-    # Output arguments
-    parser.add_argument("--output_file", type=str, help="Path to save predictions")
-    parser.add_argument("--max_length", type=int, default=512, help="Maximum sequence length")
-    parser.add_argument("--device", type=str, help="Device to use for inference (cuda, cpu)")
-    parser.add_argument("--weights", type=float, nargs="+", help="Weights for ensemble models")
-    
-    # Parse arguments
-    args = parser.parse_args()
-    
-    # Check if using ensemble
-    if args.model_paths or args.model_names:
-        # Create ensemble inference engine
-        engine = EnsembleInferenceEngine(
-            model_paths=args.model_paths or args.model_names,
-            model_names=args.model_names,
-            max_length=args.max_length,
-            device=args.device,
-            weights=args.weights,
-        )
-    else:
-        # Create single model inference engine
-        engine = InferenceEngine(
-            model_path=args.model_path,
-            model_name=args.model_name,
-            max_length=args.max_length,
-            device=args.device,
-        )
-    
-    # Perform inference
-    if args.text is not None:
-        result = engine.predict_single(args.text)
-        print(json.dumps(result, indent=2))
-    else:
-        df = engine.predict_from_file(args.input_file, args.output_file)
-        if args.output_file is None:
-            print(df.to_string()) 
+ 
