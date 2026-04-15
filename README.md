@@ -1,4 +1,4 @@
-# TD-Classifier Suite
+# TD-Classifier Suite (text_classification)
 
 A comprehensive suite for technical debt classification using transformer models. This package provides tools for training, evaluating, and deploying models to classify technical debt in software development contexts.
 
