@@ -246,47 +246,106 @@ class DataSplitter:
         return train_df, test_df, top_repo_df
 
 
-def split_and_save_data(
+def split_data(
     data_file: str,
     output_dir: str,
-    test_size: float = 0.2,
-    random_state: int = 42,
-    text_column: str = "text",
-    label_column: str = "label",
+    is_numeric_labels: bool = False,
     repo_column: Optional[str] = None,
     is_huggingface_dataset: bool = False,
-    is_numeric_labels: bool = False,
-    positive_category: Optional[str] = None,
-) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[pd.DataFrame]]:
+    test_size: float = 0.2,
+    random_state: int = 42,
+) -> None:
     """
-    Split and save data for technical debt classification.
-
+    Split data into training and test sets with balanced classes.
+    
     Args:
-        data_file: Path to the data file or Hugging Face dataset name
-        output_dir: Directory to save the split data
-        test_size: Proportion of the dataset to include in the test split
-        random_state: Random state for reproducibility
-        text_column: Name of the column containing the text
-        label_column: Name of the column containing the labels
-        repo_column: Name of the column containing the repository information
-        is_huggingface_dataset: Whether the data file is a Hugging Face dataset
-        is_numeric_labels: Whether the labels are numeric (0/1) or categorical
-        positive_category: The category to consider as positive for binary classification
-
-    Returns:
-        Tuple of (train_df, test_df, top_repo_df)
+        data_file: Path to data file or Hugging Face dataset name
+        output_dir: Directory to save split data
+        is_numeric_labels: Whether the labels are already numeric (0 or 1)
+        repo_column: Name of the repository column (optional)
+        is_huggingface_dataset: Whether the data is a Hugging Face dataset
+        test_size: Proportion of data to use for testing
+        random_state: Random seed for reproducibility
     """
-    splitter = DataSplitter(
-        data_file=data_file,
-        output_dir=output_dir,
+    # Load data
+    if is_huggingface_dataset:
+        dataset = load_dataset(data_file)
+        df = pd.DataFrame(dataset["train"])
+    else:
+        if data_file.endswith(".csv"):
+            df = pd.read_csv(data_file)
+        elif data_file.endswith(".json") or data_file.endswith(".jsonl"):
+            df = pd.read_json(data_file, lines=data_file.endswith(".jsonl"))
+        else:
+            raise ValueError(f"Unsupported file format: {data_file}")
+    
+    # Ensure labels are numeric
+    if not is_numeric_labels:
+        # Find the positive category (the one that doesn't start with "non_")
+        unique_labels = df["label"].unique()
+        if len(unique_labels) != 2:
+            raise ValueError("Binary classification requires exactly 2 unique labels")
+        
+        positive_label = None
+        non_label = None
+        for label in unique_labels:
+            if str(label).startswith("non_"):
+                non_label = label
+            else:
+                positive_label = label
+        
+        # If we couldn't identify the labels by prefix, use the first one as non_ and second as positive
+        if non_label is None or positive_label is None:
+            sorted_labels = sorted(unique_labels)
+            non_label = sorted_labels[0]
+            positive_label = sorted_labels[1]
+        
+        # Create mapping: non_ -> 0, positive -> 1
+        label_map = {non_label: 0, positive_label: 1}
+        df["label"] = df["label"].map(label_map)
+    
+    # Split data
+    train_df, test_df = train_test_split(
+        df,
         test_size=test_size,
         random_state=random_state,
-        text_column=text_column,
-        label_column=label_column,
-        repo_column=repo_column,
-        is_huggingface_dataset=is_huggingface_dataset,
-        is_numeric_labels=is_numeric_labels,
-        positive_category=positive_category,
+        stratify=df["label"]
     )
     
-    return splitter.split_and_save() 
+    # Extract top repositories if repo_column is provided
+    top_repos_df = None
+    if repo_column:
+        # Count positive samples per repository
+        repo_counts = df[df["label"] == 1].groupby(repo_column).size()
+        top_repos = repo_counts.nlargest(10).index.tolist()
+        
+        # Filter data to include only top repositories
+        top_repos_df = df[df[repo_column].isin(top_repos)]
+        
+        # Balance classes in top repositories data
+        pos_samples = top_repos_df[top_repos_df["label"] == 1]
+        neg_samples = top_repos_df[top_repos_df["label"] == 0]
+        
+        # Get the minimum number of samples between positive and negative
+        min_samples = min(len(pos_samples), len(neg_samples))
+        
+        if min_samples > 0:
+            # Sample equal number of positive and negative samples
+            pos_samples = pos_samples.sample(n=min_samples, random_state=random_state)
+            neg_samples = neg_samples.sample(n=min_samples, random_state=random_state)
+            top_repos_df = pd.concat([pos_samples, neg_samples])
+        else:
+            # If one class is empty, just use the available samples
+            top_repos_df = pd.concat([pos_samples, neg_samples])
+    
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Save split data
+    train_df.to_csv(os.path.join(output_dir, "train.csv"), index=False)
+    test_df.to_csv(os.path.join(output_dir, "test.csv"), index=False)
+    
+    if top_repos_df is not None:
+        top_repos_df.to_csv(os.path.join(output_dir, "top_repos.csv"), index=False)
+    
+    return train_df, test_df, top_repos_df 

@@ -42,94 +42,58 @@ class TDDataset(Dataset):
 
 
 class TDProcessor:
-    """Base processor for technical debt classification data."""
+    """Base class for technical debt data processing."""
 
     def __init__(self, tokenizer, max_length=512):
-        """
-        Initialize the processor.
-
-        Args:
-            tokenizer: The tokenizer to use
-            max_length: Maximum sequence length
-        """
         self.tokenizer = tokenizer
         self.max_length = max_length
 
-    def create_dataset(self, data, text_column, label_column):
-        """
-        Create a dataset from the data.
+    def load_data(self, data_file, text_column="text", label_column="label"):
+        """Load data from file or Hugging Face dataset."""
+        if isinstance(data_file, str) and os.path.exists(data_file):
+            # Load from local file
+            if data_file.endswith(".csv"):
+                df = pd.read_csv(data_file)
+            elif data_file.endswith(".json") or data_file.endswith(".jsonl"):
+                df = pd.read_json(data_file, lines=data_file.endswith(".jsonl"))
+            else:
+                raise ValueError(f"Unsupported file format: {data_file}")
+        else:
+            # Load from Hugging Face dataset
+            dataset = load_dataset(data_file)
+            df = pd.DataFrame(dataset["train"])
+        
+        return df
 
-        Args:
-            data: The data to process
-            text_column: The column containing the text
-            label_column: The column containing the labels
-
-        Returns:
-            TDDataset
-        """
-        # Tokenize the texts
+    def create_dataset(self, data, text_column="text", label_column="label"):
+        """Create a PyTorch dataset from the data."""
+        texts = data[text_column].tolist()
+        labels = data[label_column].tolist()
+        
+        # Tokenize texts
         encodings = self.tokenizer(
-            data[text_column].tolist(),
+            texts,
             truncation=True,
             padding=True,
             max_length=self.max_length,
-            return_tensors="pt",
+            return_tensors="pt"
         )
-
-        # Convert labels to integers
-        labels = data[label_column].tolist()
-
+        
         # Create dataset
-        dataset = TDDataset(encodings, labels)
-        return dataset
+        class TDDataset(torch.utils.data.Dataset):
+            def __init__(self, encodings, labels):
+                self.encodings = encodings
+                self.labels = labels
 
-    @classmethod
-    def load_data(cls, data_source, text_column="text", label_column="label", **kwargs):
-        """
-        Load data from a source (local file or Hugging Face dataset).
+            def __getitem__(self, idx):
+                item = {key: val[idx] for key, val in self.encodings.items()}
+                item["labels"] = torch.tensor(self.labels[idx])
+                return item
+
+            def __len__(self):
+                return len(self.labels)
         
-        Args:
-            data_source: Path to a local file or name of a Hugging Face dataset
-            text_column: The column containing the text
-            label_column: The column containing the labels
-            **kwargs: Additional arguments for loading the data
-            
-        Returns:
-            DataFrame containing the data
-        """
-        # Check if data_source is a local file
-        if os.path.exists(data_source):
-            # Load from local file
-            if data_source.endswith('.csv'):
-                data = pd.read_csv(data_source)
-            elif data_source.endswith('.json'):
-                data = pd.read_json(data_source)
-            elif data_source.endswith('.jsonl'):
-                data = pd.read_json(data_source, lines=True)
-            else:
-                raise ValueError(f"Unsupported file format: {data_source}")
-        else:
-            # Load from Hugging Face
-            try:
-                # Try to load as a dataset
-                dataset = load_dataset(data_source, **kwargs)
-                
-                # Convert to pandas DataFrame
-                if isinstance(dataset, dict):
-                    # If it's a dict of datasets, use the first one
-                    data = dataset[list(dataset.keys())[0]].to_pandas()
-                else:
-                    data = dataset.to_pandas()
-            except Exception as e:
-                raise ValueError(f"Failed to load dataset from Hugging Face: {e}")
-        
-        # Verify required columns exist
-        if text_column not in data.columns:
-            raise ValueError(f"Text column '{text_column}' not found in data")
-        if label_column not in data.columns:
-            raise ValueError(f"Label column '{label_column}' not found in data")
-        
-        return data
+        return TDDataset(encodings, labels)
 
 
 class BinaryTDProcessor(TDProcessor):
@@ -147,7 +111,7 @@ class BinaryTDProcessor(TDProcessor):
             numeric_labels: Whether the labels are already numeric (0 or 1)
 
         Returns:
-            DataFrame with binary labels
+            DataFrame with numeric labels (0 or 1)
         """
         # Create a copy of the data
         df = data.copy()
@@ -156,136 +120,13 @@ class BinaryTDProcessor(TDProcessor):
             # If labels are already numeric, just ensure they're integers
             df["label_idx"] = df[label_column].astype(int)
         else:
-            # Convert text labels to binary
             if positive_category is None:
                 raise ValueError("positive_category must be specified when numeric_labels=False")
+            
+            # Convert labels to binary (0 or 1)
             df["label_idx"] = (df[label_column] == positive_category).astype(int)
 
         return df
-
-
-class MultiTDProcessor(TDProcessor):
-    """Processor for multi-class technical debt classification."""
-
-    def prepare_multi_class_data(self, data, categories=None, text_column="text", label_column="label", numeric_labels=False, num_classes=None):
-        """
-        Prepare data for multi-class classification.
-
-        Args:
-            data: The data to process
-            categories: List of categories to include (ignored if numeric_labels=True)
-            text_column: The column containing the text
-            label_column: The column containing the labels
-            numeric_labels: Whether the labels are already numeric (0, 1, 2, etc.)
-            num_classes: Number of classes (required if numeric_labels=True)
-
-        Returns:
-            DataFrame with numeric labels
-        """
-        # Create a copy of the data
-        df = data.copy()
-
-        if numeric_labels:
-            # If labels are already numeric, just ensure they're integers
-            if num_classes is None:
-                raise ValueError("num_classes must be specified when numeric_labels=True")
-            
-            # Ensure labels are integers
-            df["label_idx"] = df[label_column].astype(int)
-            
-            # Create dummy mappings for compatibility
-            cat2idx = {str(i): i for i in range(num_classes)}
-            idx2cat = {i: str(i) for i in range(num_classes)}
-        else:
-            # Filter data to include only the specified categories
-            if categories is None:
-                raise ValueError("categories must be specified when numeric_labels=False")
-            
-            df = df[df[label_column].isin(categories)]
-
-            # Create a mapping from categories to indices
-            cat2idx = {cat: idx for idx, cat in enumerate(categories)}
-            idx2cat = {idx: cat for idx, cat in enumerate(categories)}
-
-            # Convert labels to indices
-            df["label_idx"] = df[label_column].map(cat2idx)
-
-        return df, cat2idx, idx2cat
-
-    def prepare_data(
-        self,
-        data: Union[pd.DataFrame, str],
-        text_col: str = "text",
-        label_col: str = "label",
-        test_size: float = 0.15,
-        random_state: int = 42,
-    ) -> Tuple[TDDataset, TDDataset]:
-        """
-        Prepare data for training and evaluation.
-
-        Args:
-            data: Either a DataFrame or a Hugging Face dataset name
-            text_col: Name of the text column
-            label_col: Name of the label column
-            test_size: Proportion of data to use for testing
-            random_state: Random seed for reproducibility
-
-        Returns:
-            Tuple of (train_dataset, test_dataset)
-        """
-        if isinstance(data, str):
-            df = self.load_data(data, text_col, label_col)
-        else:
-            df = data
-
-        train_df, test_df = train_test_split(
-            df, test_size=test_size, random_state=random_state, stratify=df[label_col]
-        )
-
-        train_dataset = self.create_dataset(train_df, text_col, label_col)
-        test_dataset = self.create_dataset(test_df, text_col, label_col)
-
-        return train_dataset, test_dataset
-
-    def prepare_k_fold(
-        self,
-        data: Union[pd.DataFrame, str],
-        text_col: str = "text",
-        label_col: str = "label",
-        n_splits: int = 5,
-        random_state: int = 42,
-    ) -> List[Tuple[TDDataset, TDDataset]]:
-        """
-        Prepare data for k-fold cross-validation.
-
-        Args:
-            data: Either a DataFrame or a Hugging Face dataset name
-            text_col: Name of the text column
-            label_col: Name of the label column
-            n_splits: Number of folds
-            random_state: Random seed for reproducibility
-
-        Returns:
-            List of (train_dataset, val_dataset) tuples for each fold
-        """
-        if isinstance(data, str):
-            df = self.load_data(data, text_col, label_col)
-        else:
-            df = data
-
-        skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
-        folds = []
-
-        for train_idx, val_idx in skf.split(df[text_col], df[label_col]):
-            train_df = df.iloc[train_idx]
-            val_df = df.iloc[val_idx]
-
-            train_dataset = self.create_dataset(train_df, text_col, label_col)
-            val_dataset = self.create_dataset(val_df, text_col, label_col)
-
-            folds.append((train_dataset, val_dataset))
-
-        return folds
 
     def extract_top_repo(
         self,

@@ -38,6 +38,7 @@ class InferenceEngine:
         self.model_name = model_name or model_path
         self.max_length = max_length
         self.device = device
+        self.show_progress = True  # Default to showing progress bars
 
         # Load model and tokenizer
         self.model = self._load_model()
@@ -122,8 +123,17 @@ class InferenceEngine:
         """
         predictions = []
 
+        # Create batches with tqdm progress bar if enabled
+        num_batches = (len(texts) + batch_size - 1) // batch_size
+        batches = range(0, len(texts), batch_size)
+        
+        # Use tqdm for progress tracking if enabled
+        if self.show_progress:
+            from tqdm import tqdm
+            batches = tqdm(batches, total=num_batches, desc="Processing batches", unit="batch")
+
         # Process in batches
-        for i in range(0, len(texts), batch_size):
+        for i in batches:
             batch_texts = texts[i:i + batch_size]
 
             # Tokenize batch
@@ -202,30 +212,27 @@ class InferenceEngine:
             
             # Map 0 to "non_" and 1 to the positive category
             unique_labels = df["label"].unique()
-            if len(unique_labels) == 2:  # Binary classification
-                # Find the positive category (the one that doesn't start with "non_")
-                positive_label = None
-                non_label = None
-                for label in unique_labels:
-                    if str(label).startswith("non_"):
-                        non_label = label
-                    else:
-                        positive_label = label
-                
-                # If we couldn't identify the labels by prefix, use the first one as non_ and second as positive
-                if non_label is None or positive_label is None:
-                    sorted_labels = sorted(unique_labels)
-                    non_label = sorted_labels[0]
-                    positive_label = sorted_labels[1]
-                
-                # Create mapping: 0 -> non_, 1 -> positive
-                label_map = {0: non_label, 1: positive_label}
-                results_df["predicted_class"] = results_df["predicted_class"].map(label_map)
-            else:  # Multi-class classification
-                # For multi-class, we'll use the sorted labels
+            if len(unique_labels) != 2:
+                raise ValueError("Binary classification requires exactly 2 unique labels")
+            
+            # Find the positive category (the one that doesn't start with "non_")
+            positive_label = None
+            non_label = None
+            for label in unique_labels:
+                if str(label).startswith("non_"):
+                    non_label = label
+                else:
+                    positive_label = label
+            
+            # If we couldn't identify the labels by prefix, use the first one as non_ and second as positive
+            if non_label is None or positive_label is None:
                 sorted_labels = sorted(unique_labels)
-                label_map = {i: label for i, label in enumerate(sorted_labels)}
-                results_df["predicted_class"] = results_df["predicted_class"].map(label_map)
+                non_label = sorted_labels[0]
+                positive_label = sorted_labels[1]
+            
+            # Create mapping: 0 -> non_, 1 -> positive
+            label_map = {0: non_label, 1: positive_label}
+            results_df["predicted_class"] = results_df["predicted_class"].map(label_map)
 
         # Save predictions if output file is specified
         if output_file:
@@ -260,7 +267,8 @@ class EnsembleInferenceEngine:
         self.model_names = model_names or []
         self.max_length = max_length
         self.device = device
-        
+        self.show_progress = True  # Default to showing progress bars
+
         # Set weights
         if weights is None:
             self.weights = [1.0 / len(self.model_paths)] * len(self.model_paths)
@@ -279,7 +287,7 @@ class EnsembleInferenceEngine:
                 # Load from Hugging Face
                 model = TransformerModel.from_pretrained(
                     name,
-                    num_labels=2,  # Default to binary classification
+                    num_labels=2,  # Binary classification
                     max_length=self.max_length,
                     device=self.device,
                 )
@@ -342,7 +350,7 @@ class EnsembleInferenceEngine:
         self, texts: List[str], batch_size: int = 32
     ) -> List[Dict[str, Union[str, float, List[float]]]]:
         """
-        Predict classes for a batch of texts using ensemble of models.
+        Predict classes for a batch of texts using an ensemble of models.
 
         Args:
             texts: List of input texts
@@ -353,12 +361,21 @@ class EnsembleInferenceEngine:
         """
         predictions = []
         
+        # Create batches with tqdm progress bar if enabled
+        num_batches = (len(texts) + batch_size - 1) // batch_size
+        batches = range(0, len(texts), batch_size)
+        
+        # Use tqdm for progress tracking if enabled
+        if self.show_progress:
+            from tqdm import tqdm
+            batches = tqdm(batches, total=num_batches, desc="Processing batches", unit="batch")
+
         # Process in batches
-        for i in range(0, len(texts), batch_size):
+        for i in batches:
             batch_texts = texts[i:i + batch_size]
-            batch_size_actual = len(batch_texts)
+            batch_size = len(batch_texts)
             
-            # Get predictions from each model
+            # Get predictions from all models
             all_probabilities = []
             
             for model, tokenizer in zip(self.models, self.tokenizers):
@@ -380,14 +397,17 @@ class EnsembleInferenceEngine:
                     probabilities = torch.softmax(outputs.logits, dim=1)
                     all_probabilities.append(probabilities.cpu().numpy())
             
-            # Weighted average of probabilities
-            weighted_probs = np.zeros_like(all_probabilities[0])
-            for j, probs in enumerate(all_probabilities):
-                weighted_probs += probs * self.weights[j]
+            # Compute weighted average of probabilities
+            weighted_probabilities = np.zeros_like(all_probabilities[0])
+            for w, p in zip(self.weights, all_probabilities):
+                weighted_probabilities += w * p
             
             # Get predicted classes and probabilities
-            predicted_classes = np.argmax(weighted_probs, axis=1)
-            predicted_probs = np.array([weighted_probs[j, pred_class] for j, pred_class in enumerate(predicted_classes)])
+            predicted_classes = np.argmax(weighted_probabilities, axis=1)
+            predicted_probs = np.array([
+                weighted_probabilities[i, predicted_classes[i]] 
+                for i in range(batch_size)
+            ])
             
             # Convert to list of dictionaries
             for j, (text, pred_class, pred_prob) in enumerate(
@@ -398,7 +418,7 @@ class EnsembleInferenceEngine:
                         "text": text,
                         "predicted_class": int(pred_class),
                         "predicted_probability": float(pred_prob),
-                        "class_probabilities": weighted_probs[j].tolist(),
+                        "class_probabilities": weighted_probabilities[j].tolist(),
                     }
                 )
         
@@ -446,30 +466,27 @@ class EnsembleInferenceEngine:
             
             # Map 0 to "non_" and 1 to the positive category
             unique_labels = df["label"].unique()
-            if len(unique_labels) == 2:  # Binary classification
-                # Find the positive category (the one that doesn't start with "non_")
-                positive_label = None
-                non_label = None
-                for label in unique_labels:
-                    if str(label).startswith("non_"):
-                        non_label = label
-                    else:
-                        positive_label = label
-                
-                # If we couldn't identify the labels by prefix, use the first one as non_ and second as positive
-                if non_label is None or positive_label is None:
-                    sorted_labels = sorted(unique_labels)
-                    non_label = sorted_labels[0]
-                    positive_label = sorted_labels[1]
-                
-                # Create mapping: 0 -> non_, 1 -> positive
-                label_map = {0: non_label, 1: positive_label}
-                results_df["predicted_class"] = results_df["predicted_class"].map(label_map)
-            else:  # Multi-class classification
-                # For multi-class, we'll use the sorted labels
+            if len(unique_labels) != 2:
+                raise ValueError("Binary classification requires exactly 2 unique labels")
+            
+            # Find the positive category (the one that doesn't start with "non_")
+            positive_label = None
+            non_label = None
+            for label in unique_labels:
+                if str(label).startswith("non_"):
+                    non_label = label
+                else:
+                    positive_label = label
+            
+            # If we couldn't identify the labels by prefix, use the first one as non_ and second as positive
+            if non_label is None or positive_label is None:
                 sorted_labels = sorted(unique_labels)
-                label_map = {i: label for i, label in enumerate(sorted_labels)}
-                results_df["predicted_class"] = results_df["predicted_class"].map(label_map)
+                non_label = sorted_labels[0]
+                positive_label = sorted_labels[1]
+            
+            # Create mapping: 0 -> non_, 1 -> positive
+            label_map = {0: non_label, 1: positive_label}
+            results_df["predicted_class"] = results_df["predicted_class"].map(label_map)
 
         # Save predictions if output file is specified
         if output_file:
