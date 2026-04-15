@@ -26,6 +26,11 @@ A suite for detecting and classifying **technical debt** in software repositorie
   - [export_onnx.py](#export_onnxpy)
   - [fetch_github_issues.py](#fetch_github_issuespy)
   - [extract_issue_bodies.py](#extract_issue_bodiespy)
+- [CI/CD Integration](#cicd-integration)
+  - [GitHub Actions — PR TD check](#github-actions--pr-td-check)
+  - [GitHub Actions — nightly repo scan](#github-actions--nightly-repo-scan)
+  - [GitLab CI](#gitlab-ci)
+  - [Docker / self-hosted runners](#docker--self-hosted-runners)
 - [Output Files](#output-files)
 - [Project Structure](#project-structure)
 - [Contributing](#contributing)
@@ -645,6 +650,233 @@ python scripts/extract_issue_bodies.py \
 | `--min-length` | `20` | Drop rows shorter than N characters |
 | `--drop-duplicates` | `false` | Remove duplicate body texts |
 | `--keep-metadata` | `false` | Also retain `number` and `title` columns |
+
+---
+
+## CI/CD Integration
+
+TD-Classifier Suite works well as a gate in automated pipelines. The recommended approach for CI is **ONNX inference** — it requires no GPU, has no PyTorch dependency, and cold-starts fast enough for pull-request checks.
+
+### GitHub Actions — PR TD check
+
+Flags a pull request if its description or changed commit messages contain technical debt language. The ONNX model is cached between runs so subsequent jobs skip the download.
+
+```yaml
+# .github/workflows/td-check.yml
+name: Technical Debt Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  td-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install tdsuite (CPU / ONNX only)
+        run: pip install -e ".[onnx]"
+
+      - name: Cache ONNX model
+        id: cache-model
+        uses: actions/cache@v4
+        with:
+          path: models/td.onnx
+          key: onnx-td-${{ hashFiles('pyproject.toml') }}
+
+      - name: Export ONNX model (first run only)
+        if: steps.cache-model.outputs.cache-hit != 'true'
+        run: |
+          python scripts/export_onnx.py \
+            --model_name karths/binary_classification_train_TD \
+            --output models/td.onnx
+
+      - name: Write PR description to file
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          echo "$PR_BODY" > /tmp/pr_text.txt
+
+      - name: Classify PR description
+        id: classify
+        run: |
+          result=$(tdsuite-inference \
+            --onnx_path models/td.onnx \
+            --text "$(cat /tmp/pr_text.txt)")
+          echo "$result"
+          # Fail if predicted_class == 1 (TD detected)
+          echo "$result" | python -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          if data['predicted_class'] == 1:
+              print(f\"::warning::TD detected (confidence {data['predicted_probability']:.0%}). Review before merging.\")
+              sys.exit(1)
+          "
+```
+
+> Change `sys.exit(1)` to `sys.exit(0)` if you want informational warnings without blocking merges.
+
+---
+
+### GitHub Actions — nightly repo scan
+
+Runs a full issues scan on a schedule and uploads the results as a workflow artifact.
+
+```yaml
+# .github/workflows/td-nightly.yml
+name: Nightly TD Scan
+
+on:
+  schedule:
+    - cron: "0 2 * * *"   # 02:00 UTC every day
+  workflow_dispatch:        # allow manual runs
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install tdsuite
+        run: pip install -e ".[onnx]"
+
+      - name: Cache ONNX model
+        uses: actions/cache@v4
+        with:
+          path: models/td.onnx
+          key: onnx-td-v1
+
+      - name: Export model if not cached
+        run: |
+          [ -f models/td.onnx ] || python scripts/export_onnx.py \
+            --model_name karths/binary_classification_train_TD \
+            --output models/td.onnx
+
+      - name: Fetch issues
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python scripts/fetch_github_issues.py \
+            --repo ${{ github.repository }} \
+            --token "$GITHUB_TOKEN" \
+            --limit 200 \
+            --output /tmp/issues.csv
+
+      - name: Clean issues
+        run: |
+          python scripts/extract_issue_bodies.py \
+            --input /tmp/issues.csv \
+            --output /tmp/issue_texts.csv \
+            --min-length 50 \
+            --drop-duplicates \
+            --keep-metadata
+
+      - name: Classify
+        run: |
+          tdsuite-inference \
+            --onnx_path models/td.onnx \
+            --input_file /tmp/issue_texts.csv \
+            --output_file /tmp/td_predictions.csv
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: td-scan-${{ github.run_id }}
+          path: /tmp/td_predictions.csv
+          retention-days: 30
+```
+
+---
+
+### GitLab CI
+
+```yaml
+# .gitlab-ci.yml (relevant excerpt)
+variables:
+  MODEL_CACHE: "$CI_PROJECT_DIR/.cache/onnx"
+
+td-check:
+  stage: test
+  image: python:3.11-slim
+  cache:
+    key: onnx-td-model
+    paths:
+      - .cache/onnx/
+  before_script:
+    - pip install -e ".[onnx]" -q
+    - mkdir -p "$MODEL_CACHE"
+    - |
+      [ -f "$MODEL_CACHE/td.onnx" ] || python scripts/export_onnx.py \
+        --model_name karths/binary_classification_train_TD \
+        --output "$MODEL_CACHE/td.onnx"
+  script:
+    - |
+      tdsuite-inference \
+        --onnx_path "$MODEL_CACHE/td.onnx" \
+        --text "$CI_MERGE_REQUEST_DESCRIPTION" \
+        | python -c "
+      import sys, json
+      data = json.load(sys.stdin)
+      prob = data['predicted_probability']
+      if data['predicted_class'] == 1:
+          print(f'TD detected — confidence {prob:.0%}')
+          sys.exit(1)
+      print(f'No TD detected (confidence {1-prob:.0%})')
+      "
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+```
+
+---
+
+### Docker / self-hosted runners
+
+For air-gapped or self-hosted environments, bake the ONNX model into your runner image so the download step is eliminated entirely.
+
+```dockerfile
+# Dockerfile.runner
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY . .
+RUN pip install -e ".[onnx]" && \
+    python scripts/export_onnx.py \
+        --model_name karths/binary_classification_train_TD \
+        --output /app/models/td.onnx
+
+# Default entrypoint — override in CI to run tdsuite-inference directly
+ENTRYPOINT ["tdsuite-inference"]
+```
+
+```bash
+# Build once
+docker build -f Dockerfile.runner -t tdsuite-runner:latest .
+
+# Use in any CI job (no network call at runtime)
+docker run --rm tdsuite-runner:latest \
+    --onnx_path /app/models/td.onnx \
+    --text "Hard-coded API keys in the config module"
+```
+
+**Tips for CI environments:**
+
+| Concern | Recommendation |
+|---------|----------------|
+| Cold-start time | Cache `models/td.onnx` between runs — the file is ~250 MB |
+| No GPU available | Use `--onnx_path`; ONNX Runtime runs entirely on CPU |
+| Blocking vs. warning | Set `sys.exit(0)` for informational-only checks |
+| Multiple TD categories | Add `--model_names` with category models to detect *which type* of TD |
+| Rate limits on issue fetch | Store `GITHUB_TOKEN` as a CI secret and pass via `--token` |
+| Air-gapped networks | Pre-bake the model in a Docker image as shown above |
 
 ---
 
