@@ -1,130 +1,263 @@
-# Text Classifier
+# TD-Classifier Suite
 
-A Python package for fine-tuning transformer models for text classification tasks.
+A comprehensive suite for technical debt classification using transformer models. This package provides tools for training, evaluating, and deploying models to classify technical debt in software development contexts.
 
 ## Features
 
-- Binary classification for single categories
-- Binary classification for multiple categories (one-vs-rest approach)
-- Multi-class classification
-- K-fold cross-validation training
-- Comprehensive metrics calculation and visualization
-- Class balancing for imbalanced datasets
-- Top repository extraction for evaluation
-- Integration with Weights & Biases for experiment tracking
+- **Classification Support**: Both binary and multi-class classification capabilities
+- **State-of-the-art Models**: Built on transformer models like BERT, RoBERTa, and DistilBERT
+- **Data Processing**: Flexible pipeline for handling various data formats and sources
+- **Advanced Training**: Cross-validation, early stopping, and class weighting for imbalanced datasets
+- **Carbon Tracking**: Monitor carbon emissions during model training
+- **Visualization**: Comprehensive metrics visualization including ROC curves, confusion matrices, and more
+- **CLI Interface**: Easy-to-use command-line tools for training and inference
+- **Batch Processing**: Efficient batch inference for large datasets
+- **Flexible Model Loading**: Support for both local models and Hugging Face models
+- **Multiple Data Sources**: Load data from local files or Hugging Face datasets
+- **Ensemble Inference**: Combine predictions from multiple models with optional weighting for improved accuracy
+- **Data Splitting**: Split data into training and test sets with balanced classes and extract top repositories
 
 ## Installation
 
 ```bash
+# Clone the repository
+git clone "our_repo"
+cd our_repo
+
+# Install the package
 pip install -e .
 ```
 
-## Package Structure
-
-```
-text_classifier/
-├── config/             # Configuration classes
-├── data/               # Data processing utilities
-├── models/             # Model definitions
-├── trainers/           # Training utilities
-├── utils/              # Utility functions
-├── train_binary.py     # Script for binary classification
-├── train_binary_multiple.py  # Script for multiple binary classifications
-├── train_multiclass.py # Script for multi-class classification
-├── setup.py            # Package installation
-└── README.md           # Documentation
+For development installation with additional tools:
+```bash
+pip install -e ".[dev]"
 ```
 
 ## Usage
 
-### Binary Classification (Single Category)
+### Data Preparation
+
+The package supports loading data from both local files and Hugging Face datasets:
+
+#### Local Files
+The package expects data in CSV, JSON, or JSONL format with at least two columns:
+- `text`: The text content to classify
+- `label`: The class label
+
+Example CSV data format with text labels:
+```csv
+text,label
+"This code has complex logic that should be simplified",code_smell
+"The documentation is outdated and needs to be updated",documentation_debt
+"The architecture violates the single responsibility principle",design_debt
+```
+
+Example CSV data format with numeric labels (0 or 1):
+```csv
+text,label
+"This code has complex logic that should be simplified",1
+"The documentation is outdated and needs to be updated",0
+"The architecture violates the single responsibility principle",1
+```
+
+
+#### Data Splitting
+
+You can split your data into training and test sets with balanced classes, and extract top repositories:
 
 ```bash
-# Using command-line arguments
-train-binary --data_file path/to/data.csv --output_dir ./output --model_name bert-base-uncased --category your_category --num_train_epochs 3
-
-# Using a configuration file
-train-binary --config path/to/config.json
+# Using a Hugging Face dataset with numeric labels
+tdsuite-split-data --data_file "karths/binary-10IQR-TD" \
+                   --output_dir "data/split" \
+                   --is_numeric_labels \
+                   --repo_column "repo" \
+                   --is_huggingface_dataset
 ```
 
-### Binary Classification (Multiple Categories)
+This will:
+1. Load the data from the Hugging Face dataset
+2. Use the existing numeric labels (0/1) directly
+3. Balance the classes in the dataset
+4. Split the data into training and test sets
+5. Extract the top repositories with the most positive class samples
+6. Save the split data to the specified output directory
+
+The output directory will contain:
+- `train.csv`: Training data with balanced classes
+- `test.csv`: Test data with balanced classes
+- `top_repos.csv`: Data from the top repositories with balanced classes
+- `label_mappings.json`: Mapping from numeric labels to text labels (if text labels are used)
+
+### Training
+
+#### Binary Classification
+
+Train a model to classify text as either technical debt or not:
 
 ```bash
-# Using command-line arguments
-train-binary-multiple --data_file path/to/data.csv --output_dir ./output --model_name bert-base-uncased --categories category1 category2 category3 --num_train_epochs 3
+# Using a Hugging Face dataset with text labels
+tdsuite-train \
+    --data_file "karths/binary-10IQR-people" \
+    --model_name "distilbert-base-uncased" \
+    --classification_type binary \
+    --positive_category "people" \
+    --output_dir "outputs/binary"
 
-# Using a configuration file
-train-binary-multiple --config path/to/config.json
-
-# Using all categories in the dataset
-train-binary-multiple --data_file path/to/data.csv --output_dir ./output --model_name bert-base-uncased --use_all_categories
+# Using a local data file with text labels
+tdsuite-train \
+    --data_file "data/split/train.csv" \
+    --model_name "distilbert-base-uncased" \
+    --classification_type binary \
+    --positive_category "TD" \
+    --output_dir "outputs/binary"
 ```
 
-### Multi-class Classification
+#### Multi-class Classification
+
+Train a model to classify text into multiple technical debt categories:
 
 ```bash
-# Using command-line arguments
-train-multiclass --data_file path/to/data.csv --output_dir ./output --model_name bert-base-uncased --num_train_epochs 3
-
-# Using a configuration file
-train-multiclass --config path/to/config.json
+# Using a Hugging Face dataset with numeric labels
+tdsuite-train \
+    --data_file "eevvgg/ad-hominem-multiclass" \
+    --model_name "distilbert-base-uncased" \
+    --classification_type multi \
+    --numeric_labels \
+    --num_classes 6 \
+    --output_dir "outputs/multiclass"
 ```
 
-## Configuration
+### Inference
 
-You can specify model and training parameters using a JSON configuration file:
+#### Batch Inference
 
-```json
-{
-  "model_name": "bert-base-uncased",
-  "num_train_epochs": 3,
-  "learning_rate": 2e-5,
-  "per_device_train_batch_size": 16,
-  "per_device_eval_batch_size": 64,
-  "warmup_steps": 500,
-  "weight_decay": 0.01,
-  "logging_dir": "./logs",
-  "logging_steps": 10,
-  "evaluation_strategy": "epoch",
-  "save_strategy": "epoch",
-  "load_best_model_at_end": true,
-  "metric_for_best_model": "f1",
-  "greater_is_better": true,
-  "seed": 42
-}
-```
-
-## Weights & Biases Integration
-
-To enable Weights & Biases logging, add the `--wandb` flag:
+Process multiple texts from a file:
 
 ```bash
-train-binary --data_file path/to/data.csv --category your_category --wandb
+# Using a local model
+tdsuite-inference \
+    --model_path "outputs/binary" \
+    --input_file "data/split/test.csv" \
+    --output_file "outputs/test_predictions.csv"
+
+# Using a Hugging Face model
+tdsuite-inference \
+    --model_name "karths/TD_model_Deberta \
+    --input_file "data/split/test.csv" \
+    --output_file "outputs/test_predictions.csv"
 ```
 
-## Output
+### Output Files
 
-After training, the following files will be generated in the output directory:
+After training, the following files will be saved in the output directory:
 
-- Model checkpoints
-- Training logs
-- Evaluation metrics
-- Confusion matrix visualization
-- Precision-recall curves
-- ROC curves
+- `pytorch_model.bin`: The trained model weights
+- `model_config.json`: Model configuration
+- `training_config.json`: Training configuration
+- `data_config.json`: Data processing configuration
+- `metrics.json`: Training and evaluation metrics
+- `confusion_matrix.png`: Confusion matrix visualization
+- `roc_curve.png`: ROC curve visualization (for binary classification)
+- `carbon_emissions.json`: Carbon emissions data from training
 
-## Requirements
+After inference with ground truth labels, the following files will be saved:
 
-- Python 3.7+
-- PyTorch 1.7+
-- Transformers 4.5+
-- scikit-learn 0.24+
-- pandas 1.1+
-- numpy 1.19+
-- matplotlib 3.3+
-- seaborn 0.11+
-- Weights & Biases 0.12+ (optional)
+- `predictions.csv`: Model predictions
+- `metrics.json`: Evaluation metrics
+- `confusion_matrix.png`: Confusion matrix visualization
+- `roc_curve.png`: ROC curve visualization (for binary classification)
+
+## Project Structure
+
+```
+tdsuite/
+├── config/             # Configuration management
+│   ├── __init__.py
+│   └── config.py       # Configuration classes
+├── data/               # Data processing and dataset classes
+│   ├── __init__.py
+│   ├── dataset.py      # Dataset and processor classes
+│   └── data_splitter.py # Data splitting utilities
+├── models/             # Model implementations
+│   ├── __init__.py
+│   ├── base.py         # Base model class
+│   └── transformer.py  # Transformer model implementation
+├── trainers/           # Training utilities
+│   ├── __init__.py
+│   ├── base.py         # Base trainer class
+│   └── td_trainer.py   # Technical debt trainer
+├── utils/              # Utility functions
+│   ├── __init__.py
+│   └── inference.py    # Inference engine
+├── train.py            # Training script
+├── inference.py        # Inference script
+└── split_data.py       # Data splitting script
+```
+
+## Advanced Usage
+
+### Cross-Validation
+
+Cross-validation helps evaluate model performance more robustly:
+
+```bash
+tdsuite-train --data_file "karths/binary-10IQR-port" \
+              --model_name "distilbert-base-uncased" \
+              --classification_type binary \
+              --positive_category "port" \
+              --output_dir "outputs/cv" \
+              --cross_validation \
+              --n_splits 10
+```
+
+This will:
+1. Split the data into 10 folds
+2. Train a model on each fold
+3. Evaluate on the held-out fold
+4. Aggregate the results across all folds
+5. Generate visualizations of the cross-validation results
+
+### Early Stopping
+
+Early stopping prevents overfitting by stopping training when the model stops improving:
+
+```bash
+tdsuite-train --data_file "karths/binary-10IQR-port" \
+              --model_name "distilbert-base-uncased" \
+              --classification_type binary \
+              --positive_category "port" \
+              --output_dir "outputs/early_stopping" \
+              --early_stopping \
+              --patience 5
+```
+
+This will:
+1. Monitor the evaluation loss during training
+2. Stop training if the loss doesn't improve for 5 epochs
+3. Restore the model from the best checkpoint
+
+### Carbon Emissions Tracking
+
+Track the carbon emissions of your training process:
+
+```bash
+tdsuite-train --data_file "karths/binary-10IQR-port" \
+              --model_name "distilbert-base-uncased" \
+              --classification_type binary \
+              --positive_category "port" \
+              --output_dir "outputs/emissions" \
+              --track_emissions
+```
+
+This will:
+1. Track energy consumption during training
+2. Calculate carbon emissions based on your location
+3. Save the emissions data to a CSV file
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-MIT
+This project is licensed under the MIT License - see the LICENSE file for details.

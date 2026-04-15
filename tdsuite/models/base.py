@@ -1,4 +1,4 @@
-"""Model classes for text classification."""
+"""Base model classes for technical debt classification."""
 
 import torch
 import torch.nn as nn
@@ -26,18 +26,19 @@ def load_model_and_tokenizer(model_name: str, num_labels: int, max_length: int =
     return model, tokenizer
 
 
-class WeightedLossModel:
-    """Model wrapper with weighted loss for imbalanced datasets."""
+class BaseModel(nn.Module):
+    """Base model class for technical debt classification."""
 
     def __init__(self, model, class_weights=None, device=None):
         """
-        Initialize the model wrapper.
+        Initialize the model.
 
         Args:
             model: The base model
             class_weights: Weights for each class
             device: Device to use (cuda or cpu)
         """
+        super().__init__()
         self.model = model
         self.class_weights = class_weights
 
@@ -51,7 +52,9 @@ class WeightedLossModel:
                 self.device
             )
 
-        self.model.to(self.device)
+        # Only move the model to the device if it's not None
+        if self.model is not None:
+            self.model.to(self.device)
 
     def compute_loss(self, logits, labels):
         """
@@ -82,7 +85,7 @@ class WeightedLossModel:
 
     @classmethod
     def from_pretrained(
-        cls, model_path: str, num_labels: int, class_weights=None, device=None
+        cls, model_path: str, num_labels: int, max_length: int = 512, class_weights=None, device=None
     ):
         """
         Load a model from disk.
@@ -90,13 +93,19 @@ class WeightedLossModel:
         Args:
             model_path: Path to the saved model
             num_labels: Number of labels for classification
+            max_length: Maximum sequence length
             class_weights: Weights for each class
             device: Device to use (cuda or cpu)
 
         Returns:
-            WeightedLossModel
+            BaseModel
         """
-        model = AutoModelForSequenceClassification.from_pretrained(
-            model_path, num_labels=num_labels
-        )
-        return cls(model, class_weights, device)
+        # Create a TransformerModel instance
+        from .transformer import TransformerModel
+        return TransformerModel(
+            model_name=model_path,
+            num_labels=num_labels,
+            max_length=max_length,
+            class_weights=class_weights,
+            device=device
+        ) 
