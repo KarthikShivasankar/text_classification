@@ -33,6 +33,74 @@ For development installation with additional tools:
 pip install -e ".[dev]"
 ```
 
+## Hugging Face Integration
+
+Our suite is fully compatible with Hugging Face's ecosystem, supporting both datasets and pre-trained models from Hugging Face Hub.
+
+### Available Datasets
+
+We provide a comprehensive collection of technical debt datasets on Hugging Face, covering various aspects of software development:
+
+- **General Technical Debt**: [karths/binary-10IQR-TD](https://huggingface.co/datasets/karths/binary-10IQR-TD)
+- **Architecture**: [karths/binary-10IQR-architecture](https://huggingface.co/datasets/karths/binary-10IQR-architecture)
+- **Code Quality**: [karths/binary-10IQR-code](https://huggingface.co/datasets/karths/binary-10IQR-code)
+- **Defects**: [karths/binary-10IQR-defect](https://huggingface.co/datasets/karths/binary-10IQR-defect)
+- **Infrastructure**: [karths/binary-10IQR-infrastructure](https://huggingface.co/datasets/karths/binary-10IQR-infrastructure)
+- **Performance**: [karths/binary-10IQR-perf](https://huggingface.co/datasets/karths/binary-10IQR-perf)
+- **Requirements**: [karths/binary-10IQR-requirement](https://huggingface.co/datasets/karths/binary-10IQR-requirement)
+- **Design**: [karths/binary-10IQR-design](https://huggingface.co/datasets/karths/binary-10IQR-design)
+- **Security**: [karths/binary-10IQR-secu](https://huggingface.co/datasets/karths/binary-10IQR-secu)
+- **Usability**: [karths/binary-10IQR-usab](https://huggingface.co/datasets/karths/binary-10IQR-usab)
+- **Compatibility**: [karths/binary-10IQR-comp](https://huggingface.co/datasets/karths/binary-10IQR-comp)
+- **Reliability**: [karths/binary-10IQR-reli](https://huggingface.co/datasets/karths/binary-10IQR-reli)
+- **Process**: [karths/binary-10IQR-process](https://huggingface.co/datasets/karths/binary-10IQR-process)
+- **Build**: [karths/binary-10IQR-build](https://huggingface.co/datasets/karths/binary-10IQR-build)
+- **Maintenance**: [karths/binary-10IQR-main](https://huggingface.co/datasets/karths/binary-10IQR-main)
+- **Automation**: [karths/binary-10IQR-automation](https://huggingface.co/datasets/karths/binary-10IQR-automation)
+- **People**: [karths/binary-10IQR-people](https://huggingface.co/datasets/karths/binary-10IQR-people)
+- **Portability**: [karths/binary-10IQR-port](https://huggingface.co/datasets/karths/binary-10IQR-port)
+
+### Pre-trained Models
+
+We provide pre-trained models for each category, available on Hugging Face Hub:
+
+- **General Technical Debt**: [karths/binary_classification_train_TD](https://huggingface.co/karths/binary_classification_train_TD)
+- **Architecture**: [karths/binary_classification_train_architecture](https://huggingface.co/karths/binary_classification_train_architecture)
+- **Code Quality**: [karths/binary_classification_train_code](https://huggingface.co/karths/binary_classification_train_code)
+- **Defects**: [karths/binary_classification_train_defect](https://huggingface.co/karths/binary_classification_train_defect)
+- **Infrastructure**: [karths/binary_classification_train_infrastructure](https://huggingface.co/karths/binary_classification_train_infrastructure)
+- **Performance**: [karths/binary_classification_train_perf](https://huggingface.co/karths/binary_classification_train_perf)
+- **Requirements**: [karths/binary_classification_train_requirement](https://huggingface.co/karths/binary_classification_train_requirement)
+- **Design**: [karths/binary_classification_train_design](https://huggingface.co/karths/binary_classification_train_design)
+- **Security**: [karths/binary_classification_train_secu](https://huggingface.co/karths/binary_classification_train_secu)
+- **Usability**: [karths/binary_classification_train_usab](https://huggingface.co/karths/binary_classification_train_usab)
+- **Reliability**: [karths/binary_classification_train_reli](https://huggingface.co/karths/binary_classification_train_reli)
+- **Process**: [karths/binary_classification_train_process](https://huggingface.co/karths/binary_classification_train_process)
+- **Build**: [karths/binary_classification_train_build](https://huggingface.co/karths/binary_classification_train_build)
+- **Maintenance**: [karths/binary_classification_train_main](https://huggingface.co/karths/binary_classification_train_main)
+- **Automation**: [karths/binary_classification_train_automation](https://huggingface.co/karths/binary_classification_train_automation)
+- **People**: [karths/binary_classification_train_people](https://huggingface.co/karths/binary_classification_train_people)
+- **Portability**: [karths/binary_classification_train_port](https://huggingface.co/karths/binary_classification_train_port)
+
+### Using Hugging Face Datasets and Models
+
+You can use these datasets and models directly with our suite:
+
+```bash
+# Using a Hugging Face dataset
+tdsuite-train \
+    --data_file "karths/binary-10IQR-TD" \
+    --model_name "distilbert-base-uncased" \
+    --positive_category "TD" \
+    --output_dir "outputs/binary" \
+    --is_huggingface_dataset
+
+# Using a pre-trained model from Hugging Face
+tdsuite-inference \
+    --model_name "karths/binary_classification_train_TD" \
+    --input_file "data/split/test.csv"
+```
+
 ## Usage
 
 ### Data Preparation
@@ -188,7 +256,7 @@ tdsuite-inference \
 
 # Using a Hugging Face model
 tdsuite-inference \
-    --model_name "karths/TD_model_Deberta" \
+    --model_name "karths/binary_classification_train_TD" \
     --input_file "data/split/test.csv"
 
 # Using a custom results directory
@@ -219,16 +287,11 @@ tdsuite-inference \
 
 # Using multiple Hugging Face models
 tdsuite-inference \
-    --model_names "karths/TD_model_Deberta" "karths/TD_model_Roberta" \
+    --model_names "karths/binary_classification_train_TD" "binary_classification_train_architecture" \
     --input_file "data/split/test.csv" \
     --weights 0.6 0.4
     
-# Using a mix of local and Hugging Face models
-tdsuite-inference \
-    --model_paths "outputs/model1" \
-    --model_names "karths/TD_model_Roberta" \
-    --input_file "data/split/test.csv" \
-    --weights 0.7 0.3
+
 ```
 
 Key features of ensemble inference:
@@ -341,7 +404,7 @@ Early stopping prevents overfitting by stopping training when the model stops im
 
 ```bash
 tdsuite-train --data_file "karths/binary-10IQR-port" \
-              --model_name "distilbert-base-uncased" \
+              --model_name "karths/binary_classification_train_port" \
               --positive_category "port" \
               --output_dir "outputs/early_stopping" \
               --early_stopping \
