@@ -115,6 +115,10 @@ class OnnxInferenceEngine:
     ) -> "OnnxInferenceEngine":
         """Download ``model.onnx`` from a Hugging Face Hub repository and load it.
 
+        If ``model.onnx`` is not present in the Hub repo, the method falls back
+        to exporting the model from its safetensors/PyTorch weights using
+        ``torch.onnx.export`` (requires ``torch`` and ``onnx`` to be installed).
+
         Args:
             model_id: Hugging Face model ID, e.g.
                 ``"karths/binary_classification_train_TD"``.
@@ -136,12 +140,29 @@ class OnnxInferenceEngine:
             )
             sys.exit(1)
 
-        print(f"Downloading model.onnx from {model_id} …")
-        onnx_path = hf_hub_download(
-            repo_id=model_id,
-            filename="model.onnx",
-            token=token,
-        )
+        # Try to download pre-exported model.onnx from the Hub
+        onnx_path = None
+        try:
+            print(f"Downloading model.onnx from {model_id} …")
+            onnx_path = hf_hub_download(
+                repo_id=model_id,
+                filename="model.onnx",
+                token=token,
+            )
+        except Exception as hub_err:
+            print(
+                f"model.onnx not found in {model_id} ({hub_err}). "
+                "Falling back to torch.onnx.export …",
+                file=sys.stderr,
+            )
+
+        if onnx_path is None:
+            onnx_path = cls._export_to_onnx(
+                model_id=model_id,
+                max_length=max_length,
+                token=token,
+            )
+
         return cls(
             onnx_path=onnx_path,
             tokenizer_path=model_id,  # AutoTokenizer handles HF Hub download
@@ -149,6 +170,123 @@ class OnnxInferenceEngine:
             show_progress=show_progress,
             device=device,
         )
+
+    @staticmethod
+    def _export_to_onnx(
+        model_id: str,
+        max_length: int = 512,
+        token: Optional[str] = None,
+    ) -> str:
+        """Export a HF model to ONNX using ``torch.onnx.export``.
+
+        The resulting file is saved under the HF Hub cache so it can be reused
+        across calls.  Requires ``torch`` and ``onnx`` to be installed.
+
+        Args:
+            model_id: Hugging Face model ID.
+            max_length: Maximum token sequence length (used for dummy input).
+            token: Optional Hugging Face API token.
+
+        Returns:
+            Path to the exported ``.onnx`` file.
+        """
+        try:
+            import torch
+        except ImportError:
+            print(
+                "Error: exporting a model to ONNX requires 'torch'.\n"
+                "Install with:  pip install torch\n"
+                "Or use a model that already has model.onnx on the Hub.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        try:
+            import onnx  # noqa: F401 — presence check only
+        except ImportError:
+            print(
+                "Error: exporting a model to ONNX requires the 'onnx' package.\n"
+                "Install with:  pip install onnx\n"
+                "Or: pip install 'tdsuite[onnx]'",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+        import tempfile, pathlib
+
+        print(f"Exporting {model_id} → ONNX (this may take a moment) …")
+
+        tokenizer = AutoTokenizer.from_pretrained(model_id, token=token)
+        model = AutoModelForSequenceClassification.from_pretrained(
+            model_id, token=token
+        )
+        model.eval()
+
+        dummy = tokenizer(
+            "dummy input text",
+            return_tensors="pt",
+            padding="max_length",
+            truncation=True,
+            max_length=min(max_length, 128),
+        )
+        input_ids = dummy["input_ids"]
+        attention_mask = dummy["attention_mask"]
+
+        # Determine which inputs the model actually expects
+        try:
+            sig = model.forward.__code__.co_varnames
+            has_token_type = "token_type_ids" in sig and "token_type_ids" in dummy
+        except Exception:
+            has_token_type = False
+
+        if has_token_type and "token_type_ids" in dummy:
+            model_inputs = (input_ids, attention_mask, dummy["token_type_ids"])
+            input_names = ["input_ids", "attention_mask", "token_type_ids"]
+            dynamic_axes = {
+                "input_ids": {0: "batch", 1: "sequence"},
+                "attention_mask": {0: "batch", 1: "sequence"},
+                "token_type_ids": {0: "batch", 1: "sequence"},
+                "logits": {0: "batch"},
+            }
+        else:
+            model_inputs = (input_ids, attention_mask)
+            input_names = ["input_ids", "attention_mask"]
+            dynamic_axes = {
+                "input_ids": {0: "batch", 1: "sequence"},
+                "attention_mask": {0: "batch", 1: "sequence"},
+                "logits": {0: "batch"},
+            }
+
+        # Cache alongside HF Hub snapshots so we don't re-export every time
+        try:
+            from huggingface_hub import snapshot_download
+
+            cache_dir = pathlib.Path(
+                snapshot_download(
+                    model_id,
+                    token=token,
+                    ignore_patterns=["*.safetensors", "*.bin", "flax_model*"],
+                )
+            )
+        except Exception:
+            cache_dir = pathlib.Path(tempfile.mkdtemp(prefix="tdsuite_onnx_"))
+
+        onnx_path = str(cache_dir / "model.onnx")
+
+        with torch.no_grad():
+            torch.onnx.export(
+                model,
+                model_inputs,
+                onnx_path,
+                opset_version=17,
+                input_names=input_names,
+                output_names=["logits"],
+                dynamic_axes=dynamic_axes,
+            )
+
+        print(f"ONNX model saved to {onnx_path}")
+        return onnx_path
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -15,9 +15,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 uv venv && uv sync           # CPU inference (ONNX) — no torch required
 uv pip install -e ".[gpu]"   # + GPU inference (onnxruntime-gpu + torch CUDA 12.4)
 uv pip install -e ".[train]" # + full training stack (torch, codecarbon, evaluate…)
-uv pip install -e ".[onnx]"  # + onnx/onnxscript for exporting custom models
-uv pip install -e ".[dev]"   # + black, isort, flake8
+uv pip install -e ".[onnx]"    # + onnx/onnxscript for exporting custom models
+uv pip install -e ".[dev]"     # + black, isort, flake8
 uv pip install -r test-requirements.txt  # + pytest, pytest-cov
+# optimum (NOTE: optimum 2.x requires transformers<5 — conflicts with current env)
+# The torch.onnx.export fallback works without optimum; only install if needed.
+uv pip install "optimum[onnxruntime]" "transformers<5"
 ```
 
 ### Installation (pip fallback)
@@ -112,7 +115,7 @@ pytest --cov=tdsuite       # config in pyproject.toml [tool.pytest.ini_options]
 - `TDTrainer` extends `BaseTrainer` with `train_with_cross_validation()`, `train_with_early_stopping()`, `predict_with_confidence()`, and `predict_with_ensemble()`.
 
 **Inference** (`tdsuite/utils/`):
-- `onnx_inference.py`: `OnnxInferenceEngine` — **default inference path**, no torch required. Supports CPU and GPU (CUDAExecutionProvider). `from_pretrained(model_id)` auto-downloads `model.onnx` from HF Hub. tqdm is a top-level import.
+- `onnx_inference.py`: `OnnxInferenceEngine` — **default inference path**, no torch required. Supports CPU and GPU (CUDAExecutionProvider). `from_pretrained(model_id)` auto-downloads `model.onnx` from HF Hub; if `model.onnx` is absent, falls back to `_export_to_onnx()` which uses `torch.onnx.export` (requires `torch` + `onnx`). tqdm is a top-level import.
 - `inference.py`: `InferenceEngine` and `EnsembleInferenceEngine` — PyTorch-based, lazy-imported (only loaded when explicitly requested via `--use_torch` or ensemble mode).
 
 **`tdsuite/inference.py`** (CLI entry point): Defaults to ONNX. Uses PyTorch only when `--use_torch` is passed or when ensemble mode (`--model_paths`/`--model_names`) is used. No top-level `import torch`.
@@ -129,6 +132,8 @@ pytest --cov=tdsuite       # config in pyproject.toml [tool.pytest.ini_options]
 
 ### Key Design Decisions
 - **Inference is ONNX-first**: `pip install -e .` gives full CPU inference; PyTorch is not installed.
+- **ONNX export fallback**: `OnnxInferenceEngine.from_pretrained` first tries to download `model.onnx` from HF Hub. If the file is absent, it calls `_export_to_onnx()` which uses `torch.onnx.export` (requires `torch` + `onnx`). The exported file is cached in the HF Hub snapshot directory.
+- **optimum compatibility**: `optimum[onnxruntime]` 2.x requires `transformers<5`; the current environment has `transformers>=5`. Do not rely on `optimum.onnxruntime.ORTModelForSequenceClassification` — use the built-in `torch.onnx.export` fallback instead.
 - **GPU inference uses ONNX**: `--device cuda` selects `CUDAExecutionProvider` (requires `pip install 'tdsuite[gpu]'`). PyTorch GPU path only available via `--use_torch`.
 - Training **requires a CUDA GPU**; the train script raises an error if none is detected.
 - Class imbalance is handled at two levels: `DataSplitter.balance_classes()` for data balancing and `WeightedLossTrainer` for loss weighting.
@@ -136,4 +141,4 @@ pytest --cov=tdsuite       # config in pyproject.toml [tool.pytest.ini_options]
 - Inference outputs land in a timestamped subdirectory (`inference_YYYYMMDD_HHMMSS/`) under the model's output directory.
 - Carbon emissions are tracked per-run via CodeCarbon and saved as `emissions.csv`/`emissions.json`.
 - All `argparse` parsers live in `tdsuite/cli.py` — add new parameters there, not in the script files.
-- `pyproject.toml` is the single source of truth for packaging, tool config (black, isort, pytest), and optional dependency groups (`gpu`, `train`, `onnx`, `dev`, `test`).
+- `pyproject.toml` is the single source of truth for packaging, tool config (black, isort, pytest), and optional dependency groups (`gpu`, `train`, `onnx`, `optimum`, `dev`, `test`).

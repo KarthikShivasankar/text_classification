@@ -60,7 +60,7 @@ A suite for detecting and classifying **technical debt** in software repositorie
 
 - **18 TD categories** — general TD, architecture, code quality, security, performance, defects, infrastructure, requirements, design, usability, compatibility, reliability, process, build, maintenance, automation, people, portability
 - **17 pre-trained models** on Hugging Face Hub — zero training required for inference
-- **ONNX-first inference** — CPU by default, no PyTorch required; all 17 models ship `model.onnx` on Hugging Face Hub — auto-downloaded on first use
+- **ONNX-first inference** — CPU by default, no PyTorch required; all 17 models ship `model.onnx` on Hugging Face Hub — auto-downloaded on first use; if `model.onnx` is absent, the engine automatically exports from safetensors via `torch.onnx.export` (requires `torch` + `onnx`)
 - **GitHub issues pipeline** — fetch → clean → classify in three commands
 - **Custom training** — fine-tune on your own data with cross-validation, class weighting, and early stopping
 - **Ensemble inference** — combine multiple category models with custom weights
@@ -95,6 +95,11 @@ uv pip install -e ".[gpu]"     # + GPU inference via onnxruntime-gpu + torch (CU
 uv pip install -e ".[train]"   # + full training stack (torch, codecarbon, evaluate…)
 uv pip install -e ".[onnx]"    # + onnx package for exporting your own models
 uv pip install -e ".[dev]"     # + black, isort, flake8
+
+# optimum (optional) — only needed if you want to use optimum's ORTModel API
+# NOTE: optimum 2.x requires transformers<5; install in a separate venv if needed.
+# The built-in torch.onnx.export fallback works without optimum.
+uv pip install "optimum[onnxruntime]" "transformers<5"
 ```
 
 > After `uv venv`, set your IDE's Python interpreter to `.venv/Scripts/python.exe` (Windows) or `.venv/bin/python` (Linux/Mac) so imports resolve correctly.
@@ -1023,6 +1028,7 @@ tests/test_dataset.py                  ............. 22 passed
 tests/test_extract_issue_bodies.py     ............. 20 passed
 tests/test_inference.py                ............. 22 passed
 tests/test_metrics.py                  ............. 14 passed
+tests/test_onnx_inference.py           ............. 23 passed
 ```
 
 ### Test coverage by module
@@ -1037,6 +1043,7 @@ tests/test_metrics.py                  ............. 14 passed
 | `tdsuite/cli.py` | `test_cli.py` | All six `get_*_parser()` functions — required args, defaults, flags, mutually-exclusive groups, error cases |
 | `scripts/extract_issue_bodies.py` | `test_extract_issue_bodies.py` | `clean_text` — code blocks, HTML, Markdown, URLs, emoji, whitespace; full CSV pipeline |
 | `tdsuite/utils/inference.py` | `test_inference.py` | `InferenceEngine` `predict_single`, `predict_batch`, `predict_from_file`; `EnsembleInferenceEngine` init, weight normalisation, `predict_single`, `predict_batch` — all mocked |
+| `tdsuite/utils/onnx_inference.py` | `test_onnx_inference.py` | `OnnxInferenceEngine` `predict_single`, `predict_batch`, `predict_from_file`; `from_pretrained` Hub-download path and `torch.onnx.export` fallback — all mocked |
 
 ### What each test file covers
 
@@ -1057,6 +1064,8 @@ tests/test_metrics.py                  ............. 14 passed
 **`tests/test_extract_issue_bodies.py`** — calls `clean_text()` with various inputs (fenced code blocks, inline code, HTML tags, markdown links, images, headings, bold, lists, blockquotes, emoji, extra whitespace) and verifies both removal of noise and preservation of prose; also exercises the CSV pipeline and deduplication logic.
 
 **`tests/test_inference.py`** — patches `TransformerModel` and `AutoTokenizer` (for `InferenceEngine`) and `AutoModelForSequenceClassification`/`AutoTokenizer` (for `EnsembleInferenceEngine`) to avoid any network access or GPU requirement; verifies output structure, probability ranges, file I/O, and error handling.
+
+**`tests/test_onnx_inference.py`** — patches `onnxruntime.InferenceSession` and `AutoTokenizer` so no network or GPU is needed; verifies `OnnxInferenceEngine` output structure, probability ranges, file I/O (CSV, JSON, JSONL), error handling, and that `from_pretrained` calls `_export_to_onnx` when `model.onnx` is absent from the Hub.
 
 ---
 

@@ -58,6 +58,13 @@ onnx = [
     "onnx>=1.14.0",
     "torch>=2.0.0",
 ]
+# optimum — on-the-fly ONNX export for models without a pre-exported model.onnx
+# NOTE: optimum 2.x requires transformers<5 — pin accordingly if needed.
+optimum = [
+    "optimum[onnxruntime]>=1.14.0,<3.0.0",
+    "transformers>=4.15.0,<5.0.0",
+    "onnx>=1.14.0",
+]
 dev = [
     "black>=21.0.0",
     "isort>=5.9.0",
