@@ -6,7 +6,7 @@ A suite for detecting and classifying **technical debt** in software repositorie
 
 ## Table of Contents
 
-- [What is Technical Debt?](#what-is-technical-debt)
+
 - [Use Cases](#use-cases)
 - [Features](#features)
 - [Installation](#installation)
