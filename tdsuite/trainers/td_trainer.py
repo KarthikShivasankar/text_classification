@@ -104,7 +104,9 @@ class TDTrainer(BaseTrainer):
                     output_dir=emissions_dir,
                     project_name="cross_validation",
                     output_file="cross_validation_emissions.csv",
-                    allow_multiple_runs=True
+                    allow_multiple_runs=True,
+                    log_level="error",
+                    save_to_api=False,
                 )
                 emissions_tracker.start()
                 print("🌱 Carbon emissions tracking started for cross-validation")

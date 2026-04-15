@@ -149,8 +149,8 @@ def get_inference_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--device",
         type=str,
-        default="cuda",
-        help="Device to use for inference (cuda, cpu)",
+        default=None,
+        help="Device to use for inference (cuda, cpu, or None for auto-detection)",
     )
     parser.add_argument(
         "--weights", type=float, nargs="+", help="Weights for ensemble models"

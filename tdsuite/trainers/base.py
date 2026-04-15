@@ -117,7 +117,7 @@ class BaseTrainer:
 
         # Initialize emissions tracker
         if self.track_emissions:
-            self.tracker = EmissionsTracker()
+            self.tracker = EmissionsTracker(log_level="error", save_to_api=False)
 
     def train(self, train_dataset, eval_dataset=None):
         """
@@ -174,7 +174,9 @@ class BaseTrainer:
                 output_dir=emissions_dir,
                 project_name="training",
                 output_file="training_emissions.csv",
-                allow_multiple_runs=True
+                allow_multiple_runs=True,
+                log_level="error",
+                save_to_api=False,
             )
             
             # Start tracking

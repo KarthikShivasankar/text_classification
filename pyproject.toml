@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "tdsuite"
@@ -25,7 +25,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "torch>=1.10.0",
+    "torch>=2.0.0",
     "transformers>=4.15.0",
     "datasets>=2.0.0",
     "scikit-learn>=1.0.0",
@@ -63,6 +63,14 @@ Repository = "https://github.com/KarthikShivasankar/text_classification"
 tdsuite-train = "tdsuite.train:main"
 tdsuite-inference = "tdsuite.inference:main"
 tdsuite-split-data = "tdsuite.split_data:main"
+
+[[tool.uv.index]]
+name = "pytorch-cuda"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cuda" }
 
 [tool.setuptools.packages.find]
 where = ["."]
