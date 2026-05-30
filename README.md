@@ -64,7 +64,7 @@ A suite for detecting and classifying **technical debt** in software repositorie
 - **ONNX-first inference** — CPU by default, no PyTorch required; all 17 models ship `model.onnx` on Hugging Face Hub — auto-downloaded on first use; if `model.onnx` is absent, the engine automatically exports from safetensors via `torch.onnx.export` (requires `torch` + `onnx`)
 - **GitHub issues pipeline** — fetch → clean → classify in three commands
 - **Custom training** — fine-tune on your own data with cross-validation, class weighting, and early stopping
-- **Ensemble inference** — combine multiple category models with custom weights
+- **Ensemble inference** — combine multiple category models with custom weights; runs on ONNX by default (no PyTorch required, CPU or GPU), with an optional PyTorch backend via `--use_torch`
 - **Carbon tracking** — CodeCarbon emissions tracking on every training and inference run
 - **Gradio web UI** — browser-based interface for non-CLI users
 
@@ -376,8 +376,10 @@ ONNX Runtime is typically **2–4× faster** than PyTorch on CPU and has no depe
 
 Run several category-specific models in parallel and combine their predictions. Useful when you want to know not just *whether* an issue is TD, but *what kind*.
 
+Ensemble inference runs on the **ONNX backend by default** — no PyTorch required, on CPU or GPU. Each member loads as an `OnnxInferenceEngine`, and the ensemble returns a normalised weighted mean of the per-model softmax probabilities plus the argmax class.
+
 ```bash
-# Weighted ensemble: general TD + security + code quality
+# Weighted ensemble (ONNX CPU, default): general TD + security + code quality
 tdsuite-inference \
     --model_names \
         karths/binary_classification_train_TD \
@@ -389,6 +391,30 @@ tdsuite-inference \
 ```
 
 If `--weights` is omitted, equal weights are applied automatically. The final prediction is a weighted average of each model's class probabilities.
+
+**ONNX GPU ensemble** (requires `pip install -e ".[gpu]"`):
+
+```bash
+tdsuite-inference \
+    --model_names \
+        karths/binary_classification_train_TD \
+        karths/binary_classification_train_secu \
+    --device cuda \
+    --weights 0.6 0.4 \
+    --input_file issue_texts.csv
+```
+
+**PyTorch ensemble** — only when you explicitly pass `--use_torch` (requires `pip install -e ".[gpu]"`):
+
+```bash
+tdsuite-inference \
+    --model_names \
+        karths/binary_classification_train_TD \
+        karths/binary_classification_train_secu \
+    --use_torch \
+    --weights 0.6 0.4 \
+    --input_file issue_texts.csv
+```
 
 **Local ensemble (after training multiple models):**
 
@@ -568,21 +594,31 @@ tdsuite-inference --onnx_path models/td.onnx --input_file issues.csv
 # Local model checkpoint (PyTorch, requires --use_torch)
 tdsuite-inference --model_path outputs/my_model --use_torch --input_file issues.csv
 
-# Ensemble (uses PyTorch backend automatically)
+# Ensemble — ONNX backend by default (no torch required, CPU or GPU)
 tdsuite-inference \
     --model_names karths/binary_classification_train_TD karths/binary_classification_train_secu \
     --input_file issues.csv \
     --weights 0.6 0.4
+
+# Ensemble on GPU — ONNX with CUDAExecutionProvider (requires pip install 'tdsuite[gpu]')
+tdsuite-inference \
+    --model_names karths/binary_classification_train_TD karths/binary_classification_train_secu \
+    --device cuda --input_file issues.csv --weights 0.6 0.4
+
+# Ensemble on the PyTorch backend — only when --use_torch is passed
+tdsuite-inference \
+    --model_names karths/binary_classification_train_TD karths/binary_classification_train_secu \
+    --use_torch --input_file issues.csv --weights 0.6 0.4
 ```
 
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `--model_path` | — | Local model directory (ONNX auto-detected; or use `--use_torch`) |
 | `--model_name` | — | HF model name — `model.onnx` downloaded automatically |
-| `--model_paths` | — | Multiple local directories (ensemble, PyTorch) |
-| `--model_names` | — | Multiple HF model names (ensemble, PyTorch) |
+| `--model_paths` | — | Multiple local directories (ensemble; ONNX by default, PyTorch with `--use_torch`) |
+| `--model_names` | — | Multiple HF model names (ensemble; ONNX by default, PyTorch with `--use_torch`) |
 | `--onnx_path` | — | Explicit path to a local `.onnx` file |
-| `--use_torch` | `false` | Force PyTorch backend (requires `pip install 'tdsuite[gpu]'`) |
+| `--use_torch` | `false` | Force PyTorch backend for single-model or ensemble inference (requires `pip install 'tdsuite[gpu]'`) |
 | `--text` | — | Single text string to classify |
 | `--input_file` | — | CSV or JSON file to classify |
 | `--text_column` | `text` | Column containing text |
@@ -979,8 +1015,8 @@ text_classification/
 │   │   ├── base.py                   # WeightedLossTrainer, BaseTrainer (emissions tracking)
 │   │   └── td_trainer.py             # TDTrainer — cross-validation, early stopping, ensemble
 │   └── utils/
-│       ├── onnx_inference.py         # OnnxInferenceEngine — default CPU/GPU inference (no torch)
-│       ├── inference.py              # InferenceEngine, EnsembleInferenceEngine (PyTorch)
+│       ├── onnx_inference.py         # OnnxInferenceEngine + OnnxEnsembleInferenceEngine — default CPU/GPU inference (no torch)
+│       ├── inference.py              # InferenceEngine, EnsembleInferenceEngine (PyTorch, --use_torch)
 │       ├── metrics.py                # compute_metrics, confusion matrix, ROC plots
 │       └── data_utils.py             # load_dataset, preprocess_text
 ├── app.py                            # Gradio web UI (port 7077)
