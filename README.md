@@ -37,6 +37,7 @@ A suite for detecting and classifying **technical debt** in software repositorie
   - [What each test file covers](#what-each-test-file-covers)
 - [Output Files](#output-files)
 - [Project Structure](#project-structure)
+- [Citation](#citation)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -1066,6 +1067,23 @@ tests/test_onnx_inference.py           ............. 23 passed
 **`tests/test_inference.py`** — patches `TransformerModel` and `AutoTokenizer` (for `InferenceEngine`) and `AutoModelForSequenceClassification`/`AutoTokenizer` (for `EnsembleInferenceEngine`) to avoid any network access or GPU requirement; verifies output structure, probability ranges, file I/O, and error handling.
 
 **`tests/test_onnx_inference.py`** — patches `onnxruntime.InferenceSession` and `AutoTokenizer` so no network or GPU is needed; verifies `OnnxInferenceEngine` output structure, probability ranges, file I/O (CSV, JSON, JSONL), error handling, and that `from_pretrained` calls `_export_to_onnx` when `model.onnx` is absent from the Hub.
+
+---
+
+## Citation
+
+If you use TD-Suite in your research, please cite:
+
+```bibtex
+@inproceedings{shivashankar2026td,
+  title={TD-Suite: All Batteries Included Framework for Technical Debt Classification},
+  author={Shivashankar, Karthik and Martini, Antonio},
+  booktitle={International Conference on Agile Software Development},
+  pages={137--151},
+  year={2026},
+  organization={Springer}
+}
+```
 
 ---
 
