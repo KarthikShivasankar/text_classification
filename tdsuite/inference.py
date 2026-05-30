@@ -14,7 +14,10 @@ os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
 import pandas as pd
 
-from tdsuite.utils.onnx_inference import OnnxInferenceEngine
+from tdsuite.utils.onnx_inference import (
+    OnnxEnsembleInferenceEngine,
+    OnnxInferenceEngine,
+)
 from tdsuite.cli import get_inference_parser
 
 
@@ -59,10 +62,9 @@ def _resolve_device(args, use_torch: bool) -> str:
     """
     from tdsuite.utils.onnx_inference import auto_select_device
 
-    is_torch_backend = use_torch or bool(
-        getattr(args, "model_paths", None) or getattr(args, "model_names", None)
-    )
-    backend = "torch" if is_torch_backend else "onnx"
+    # Ensemble inference now defaults to the ONNX backend; only an explicit
+    # --use_torch switches to the PyTorch engines.
+    backend = "torch" if use_torch else "onnx"
     return auto_select_device(_requested_device(args), backend=backend)
 
 
@@ -96,6 +98,24 @@ def _build_torch_engine(args, device: str):
         model_name=args.model_name,
         max_length=args.max_length,
         device=device,
+    )
+
+
+def _build_onnx_ensemble_engine(args, device: str) -> OnnxEnsembleInferenceEngine:
+    """Build an OnnxEnsembleInferenceEngine (no torch required)."""
+    if args.weights:
+        num_models = max(len(args.model_paths or []), len(args.model_names or []))
+        if len(args.weights) != num_models:
+            raise ValueError(
+                f"Number of weights ({len(args.weights)}) must match number of models ({num_models})"
+            )
+    return OnnxEnsembleInferenceEngine(
+        model_paths=args.model_paths,
+        model_names=args.model_names,
+        max_length=args.max_length,
+        show_progress=not args.disable_progress_bar,
+        device=device,
+        weights=args.weights,
     )
 
 
@@ -214,11 +234,12 @@ def main():
     try:
         # Build inference engine
         if use_torch:
+            # Explicit PyTorch backend (single model or ensemble).
             engine = _build_torch_engine(args, device)
         elif args.model_paths or args.model_names:
-            # Ensemble: fall back to torch for now (ONNX ensemble not yet supported)
-            print("Ensemble mode detected — using PyTorch backend.")
-            engine = _build_torch_engine(args, device)
+            # Ensemble inference on the ONNX backend (no torch required).
+            print("Ensemble mode detected — using ONNX backend.")
+            engine = _build_onnx_ensemble_engine(args, device)
         else:
             engine = _build_onnx_engine(args, device)
 

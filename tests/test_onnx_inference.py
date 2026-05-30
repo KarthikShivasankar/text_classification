@@ -243,3 +243,144 @@ class TestFromPretrainedFallback:
             OnnxInferenceEngine.from_pretrained("some/model", token="hf_abc")
             _, kwargs = mock_export.call_args
             assert kwargs.get("token") == "hf_abc"
+
+
+# ===========================================================================
+# OnnxEnsembleInferenceEngine
+# ===========================================================================
+
+def _make_member_engine(class1_prob: float = 0.8):
+    """Return a mock ONNX member engine exposing _tokenize / _run_session."""
+    member = MagicMock()
+
+    def _tok(texts, **kwargs):
+        if isinstance(texts, str):
+            texts = [texts]
+        return {"input_ids": np.zeros((len(texts), 16), dtype=np.int64)}
+
+    def _run(inputs):
+        bs = inputs["input_ids"].shape[0]
+        probs = np.zeros((bs, 2), dtype=np.float32)
+        probs[:, 1] = class1_prob
+        probs[:, 0] = 1.0 - class1_prob
+        return probs
+
+    member._tokenize.side_effect = _tok
+    member._run_session.side_effect = _run
+    return member
+
+
+@pytest.fixture
+def onnx_ensemble_engine():
+    """OnnxEnsembleInferenceEngine backed by two mocked member engines."""
+    members = [_make_member_engine(0.8), _make_member_engine(0.6)]
+
+    with patch("tdsuite.utils.onnx_inference._build_onnx_member", side_effect=members), \
+         patch("tdsuite.utils.onnx_inference.auto_select_device", return_value="cpu"):
+        from tdsuite.utils.onnx_inference import OnnxEnsembleInferenceEngine
+        engine = OnnxEnsembleInferenceEngine(
+            model_names=["m1", "m2"], show_progress=False
+        )
+        yield engine
+
+
+class TestOnnxEnsembleInit:
+    def test_builds_two_members(self, onnx_ensemble_engine):
+        assert len(onnx_ensemble_engine.engines) == 2
+
+    def test_equal_weights_default(self, onnx_ensemble_engine):
+        assert onnx_ensemble_engine.weights == pytest.approx([0.5, 0.5])
+
+    def test_custom_weights_normalised(self):
+        members = [_make_member_engine(0.8), _make_member_engine(0.6)]
+        with patch("tdsuite.utils.onnx_inference._build_onnx_member", side_effect=members), \
+             patch("tdsuite.utils.onnx_inference.auto_select_device", return_value="cpu"):
+            from tdsuite.utils.onnx_inference import OnnxEnsembleInferenceEngine
+            engine = OnnxEnsembleInferenceEngine(
+                model_names=["m1", "m2"], weights=[3.0, 1.0], show_progress=False
+            )
+        assert engine.weights == pytest.approx([0.75, 0.25])
+
+    def test_wrong_weight_count_raises(self):
+        members = [_make_member_engine(0.8), _make_member_engine(0.6)]
+        with patch("tdsuite.utils.onnx_inference._build_onnx_member", side_effect=members), \
+             patch("tdsuite.utils.onnx_inference.auto_select_device", return_value="cpu"):
+            from tdsuite.utils.onnx_inference import OnnxEnsembleInferenceEngine
+            with pytest.raises(ValueError, match="weights"):
+                OnnxEnsembleInferenceEngine(
+                    model_names=["m1", "m2"], weights=[0.5], show_progress=False
+                )
+
+    def test_no_models_raises(self):
+        with patch("tdsuite.utils.onnx_inference.auto_select_device", return_value="cpu"):
+            from tdsuite.utils.onnx_inference import OnnxEnsembleInferenceEngine
+            with pytest.raises(ValueError, match="At least one"):
+                OnnxEnsembleInferenceEngine(show_progress=False)
+
+
+class TestOnnxEnsemblePredictSingle:
+    def test_required_keys(self, onnx_ensemble_engine):
+        result = onnx_ensemble_engine.predict_single("test text")
+        for key in ("text", "predicted_class", "predicted_probability", "class_probabilities"):
+            assert key in result
+
+    def test_predicted_class_is_int(self, onnx_ensemble_engine):
+        result = onnx_ensemble_engine.predict_single("test text")
+        assert isinstance(result["predicted_class"], int)
+
+    def test_class_probabilities_sum_to_one(self, onnx_ensemble_engine):
+        result = onnx_ensemble_engine.predict_single("test text")
+        assert sum(result["class_probabilities"]) == pytest.approx(1.0, abs=1e-5)
+
+    def test_weighted_average_is_correct(self, onnx_ensemble_engine):
+        """Equal weights of class-1 probs 0.8 and 0.6 => 0.7."""
+        result = onnx_ensemble_engine.predict_single("anything")
+        assert result["predicted_class"] == 1
+        assert result["class_probabilities"][1] == pytest.approx(0.7, abs=1e-5)
+
+    def test_text_preserved(self, onnx_ensemble_engine):
+        text = "specific input text"
+        assert onnx_ensemble_engine.predict_single(text)["text"] == text
+
+
+class TestOnnxEnsemblePredictBatch:
+    def test_returns_list_of_dicts(self, onnx_ensemble_engine):
+        results = onnx_ensemble_engine.predict_batch(["a", "b", "c"], batch_size=2)
+        assert isinstance(results, list)
+        assert len(results) == 3
+
+    def test_batch_larger_than_batch_size(self, onnx_ensemble_engine):
+        texts = [f"text {i}" for i in range(10)]
+        results = onnx_ensemble_engine.predict_batch(texts, batch_size=3)
+        assert len(results) == 10
+
+    def test_probabilities_sum_to_one(self, onnx_ensemble_engine):
+        for item in onnx_ensemble_engine.predict_batch(["x", "y"]):
+            assert sum(item["class_probabilities"]) == pytest.approx(1.0, abs=1e-5)
+
+
+class TestOnnxEnsemblePredictFromFile:
+    def test_result_has_prediction_columns(self, onnx_ensemble_engine, csv_file):
+        result = onnx_ensemble_engine.predict_from_file(csv_file)
+        for col in ("predicted_class", "predicted_probability", "class_probabilities"):
+            assert col in result.columns
+
+    def test_result_length_matches_input(self, onnx_ensemble_engine, csv_file):
+        original = pd.read_csv(csv_file)
+        result = onnx_ensemble_engine.predict_from_file(csv_file)
+        assert len(result) == len(original)
+
+    def test_saves_to_file(self, onnx_ensemble_engine, csv_file, tmp_path):
+        out = str(tmp_path / "out" / "ensemble_predictions.csv")
+        onnx_ensemble_engine.predict_from_file(csv_file, output_file=out)
+        assert os.path.exists(out)
+
+    def test_unsupported_format_raises(self, onnx_ensemble_engine, tmp_path):
+        bad = str(tmp_path / "data.txt")
+        Path(bad).write_text("bad")
+        with pytest.raises(ValueError):
+            onnx_ensemble_engine.predict_from_file(bad)
+
+    def test_json_file(self, onnx_ensemble_engine, json_file):
+        result = onnx_ensemble_engine.predict_from_file(json_file)
+        assert "predicted_class" in result.columns

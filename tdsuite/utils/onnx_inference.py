@@ -568,3 +568,228 @@ class OnnxInferenceEngine:
             df.to_csv(output_file, index=False)
 
         return df
+
+
+def _build_onnx_member(
+    source: str,
+    device: Optional[str] = None,
+    max_length: int = 512,
+    show_progress: bool = True,
+    token: Optional[str] = None,
+) -> "OnnxInferenceEngine":
+    """Build a single :class:`OnnxInferenceEngine` from a path or HF model ID.
+
+    Mirrors the resolution logic used for single-model ONNX inference: a local
+    directory containing ``model.onnx`` is used directly, otherwise the source
+    is treated as a Hugging Face model ID (or local path with ``model.onnx`` on
+    the Hub) and resolved via :meth:`OnnxInferenceEngine.from_pretrained`.
+    """
+    if source.lower().endswith(".onnx") and os.path.exists(source):
+        return OnnxInferenceEngine(
+            onnx_path=source,
+            max_length=max_length,
+            show_progress=show_progress,
+            device=device,
+        )
+
+    local_onnx = os.path.join(source, "model.onnx") if os.path.isdir(source) else None
+    if local_onnx and os.path.exists(local_onnx):
+        return OnnxInferenceEngine(
+            onnx_path=local_onnx,
+            tokenizer_path=source,
+            max_length=max_length,
+            show_progress=show_progress,
+            device=device,
+        )
+
+    return OnnxInferenceEngine.from_pretrained(
+        model_id=source,
+        device=device,
+        max_length=max_length,
+        show_progress=show_progress,
+        token=token,
+    )
+
+
+class OnnxEnsembleInferenceEngine:
+    """Ensemble inference over several ONNX models — no PyTorch required.
+
+    Holds a list of :class:`OnnxInferenceEngine` members (one per model) and
+    combines their per-class probabilities with weighted averaging, using the
+    same semantics as the PyTorch ``EnsembleInferenceEngine`` (weights are
+    normalised to sum to 1, the weighted mean of the softmax probabilities is
+    taken, and the predicted label is the argmax).
+
+    Supports CPU (default) and GPU via ``CUDAExecutionProvider`` (requires
+    ``onnxruntime-gpu``). Each member is built with
+    :meth:`OnnxInferenceEngine.from_pretrained` (for HF model IDs) or directly
+    from a local ``model.onnx`` / model directory.
+
+    Example::
+
+        engine = OnnxEnsembleInferenceEngine(
+            model_names=["karths/model_a", "karths/model_b"],
+            weights=[0.6, 0.4],
+        )
+        engine.predict_single("some text about technical debt")
+    """
+
+    def __init__(
+        self,
+        model_paths: Optional[List[str]] = None,
+        model_names: Optional[List[str]] = None,
+        max_length: int = 512,
+        show_progress: bool = True,
+        device: Optional[str] = None,
+        weights: Optional[List[float]] = None,
+        token: Optional[str] = None,
+    ):
+        """
+        Args:
+            model_paths: Local model directories or ``.onnx`` file paths.
+            model_names: Hugging Face model IDs (``model.onnx`` auto-downloaded).
+            max_length: Maximum token sequence length.
+            show_progress: Whether to show a tqdm progress bar for batches.
+            device: ``"cpu"`` or ``"cuda"``. When ``None`` it is auto-detected
+                (CPU unless a CUDA GPU with > 6 GB free VRAM and the ONNX
+                CUDAExecutionProvider are available).
+            weights: Optional per-model weights (normalised to sum to 1).
+            token: Optional Hugging Face API token for private repos.
+        """
+        self.model_paths = model_paths or []
+        self.model_names = model_names or []
+        self.max_length = max_length
+        self.show_progress = show_progress
+        self.device = auto_select_device(device, backend="onnx")
+
+        if not self.model_paths and not self.model_names:
+            raise ValueError(
+                "At least one of model_paths or model_names must be provided"
+            )
+
+        # Build one ONNX engine per model. Member progress bars are suppressed
+        # so only the ensemble-level bar is shown.
+        self.engines: List[OnnxInferenceEngine] = []
+        for source in [*self.model_paths, *self.model_names]:
+            engine = _build_onnx_member(
+                source,
+                device=self.device,
+                max_length=max_length,
+                show_progress=False,
+                token=token,
+            )
+            self.engines.append(engine)
+
+        if not self.engines:
+            raise ValueError("No models were successfully loaded")
+
+        # Normalise weights to sum to 1 (equal weighting by default).
+        if weights is None:
+            self.weights = [1.0 / len(self.engines)] * len(self.engines)
+        else:
+            if len(weights) != len(self.engines):
+                raise ValueError(
+                    f"Number of weights ({len(weights)}) must match number of "
+                    f"models ({len(self.engines)})"
+                )
+            total_weight = sum(weights)
+            self.weights = [w / total_weight for w in weights]
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _weighted_probabilities(self, texts: List[str]) -> np.ndarray:
+        """Return the weighted-mean softmax probabilities for a list of texts.
+
+        Shape: ``(len(texts), num_classes)``.
+        """
+        weighted = None
+        for engine, weight in zip(self.engines, self.weights):
+            inputs = engine._tokenize(texts)
+            probs = engine._run_session(inputs)  # (batch, num_classes)
+            if weighted is None:
+                weighted = np.zeros_like(probs)
+            weighted += probs * weight
+        return weighted
+
+    # ------------------------------------------------------------------
+    # Public API (drop-in for EnsembleInferenceEngine / OnnxInferenceEngine)
+    # ------------------------------------------------------------------
+
+    def predict_single(self, text: str) -> Dict[str, Union[str, float, List[float]]]:
+        """Predict the class for a single text using the ONNX ensemble."""
+        probs = self._weighted_probabilities([text])[0]
+        predicted_class = int(np.argmax(probs))
+        return {
+            "text": text,
+            "predicted_class": predicted_class,
+            "predicted_probability": float(probs[predicted_class]),
+            "class_probabilities": probs.tolist(),
+        }
+
+    def predict_batch(
+        self, texts: List[str], batch_size: int = 32
+    ) -> List[Dict[str, Union[str, float, List[float]]]]:
+        """Predict classes for a list of texts using the ONNX ensemble."""
+        predictions = []
+        num_batches = (len(texts) + batch_size - 1) // batch_size
+        batches = range(0, len(texts), batch_size)
+        if self.show_progress:
+            batches = tqdm(
+                batches, total=num_batches, desc="ONNX ensemble inference", unit="batch"
+            )
+
+        for i in batches:
+            batch_texts = texts[i : i + batch_size]
+            probs = self._weighted_probabilities(batch_texts)
+            for text, prob_row in zip(batch_texts, probs):
+                predicted_class = int(np.argmax(prob_row))
+                predictions.append(
+                    {
+                        "text": text,
+                        "predicted_class": predicted_class,
+                        "predicted_probability": float(prob_row[predicted_class]),
+                        "class_probabilities": prob_row.tolist(),
+                    }
+                )
+        return predictions
+
+    def predict_from_file(
+        self,
+        input_file: str,
+        output_file: Optional[str] = None,
+        text_column: str = "text",
+        batch_size: int = 32,
+    ) -> pd.DataFrame:
+        """Run ensemble inference on every row of a CSV/JSON file.
+
+        Output columns mirror :meth:`OnnxInferenceEngine.predict_from_file`:
+        the original columns plus ``predicted_class``, ``predicted_probability``
+        and ``class_probabilities``.
+        """
+        ext = os.path.splitext(input_file)[1].lower()
+        if ext == ".csv":
+            df = pd.read_csv(input_file)
+        elif ext in (".json", ".jsonl"):
+            df = pd.read_json(input_file, lines=ext == ".jsonl")
+        else:
+            raise ValueError(f"Unsupported file format: {input_file}")
+
+        if text_column not in df.columns:
+            raise ValueError(
+                f"Column '{text_column}' not found. Available: {list(df.columns)}"
+            )
+
+        texts = df[text_column].fillna("").tolist()
+        predictions = self.predict_batch(texts, batch_size=batch_size)
+
+        df["predicted_class"] = [p["predicted_class"] for p in predictions]
+        df["predicted_probability"] = [p["predicted_probability"] for p in predictions]
+        df["class_probabilities"] = [str(p["class_probabilities"]) for p in predictions]
+
+        if output_file:
+            os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
+            df.to_csv(output_file, index=False)
+
+        return df

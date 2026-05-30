@@ -273,3 +273,76 @@ class TestEnsembleInferenceEnginePredictBatch:
     def test_empty_list_raises(self, ee_engine):
         with pytest.raises(ValueError, match="empty"):
             ee_engine.predict_batch([])
+
+
+# ---------------------------------------------------------------------------
+# CLI routing — ensemble backend selection (tdsuite/inference.py main)
+# ---------------------------------------------------------------------------
+
+class TestCliEnsembleRouting:
+    """Ensemble args route to the ONNX engine by default, torch with --use_torch."""
+
+    def _run_main(self, extra_args, tmp_path):
+        """Run inference.main() with mocked engine builders; return the mocks."""
+        from tdsuite.cli import get_inference_parser
+        import tdsuite.inference as inf
+
+        args = get_inference_parser().parse_args(
+            ["--model_paths", "a", "b", "--text", "hello", *extra_args]
+        )
+        args.track_emissions = False
+        args.results_dir = str(tmp_path)
+
+        mock_engine = MagicMock()
+        mock_engine.predict_single.return_value = {
+            "text": "hello",
+            "predicted_class": 1,
+            "predicted_probability": 0.9,
+            "class_probabilities": [0.1, 0.9],
+        }
+
+        with patch.object(inf, "parse_args", return_value=args), \
+             patch.object(inf, "_build_onnx_ensemble_engine",
+                          return_value=mock_engine) as onnx_builder, \
+             patch.object(inf, "_build_torch_engine",
+                          return_value=mock_engine) as torch_builder, \
+             patch.object(inf, "_resolve_device", return_value="cpu"):
+            inf.main()
+        return onnx_builder, torch_builder
+
+    def test_ensemble_defaults_to_onnx(self, tmp_path):
+        onnx_builder, torch_builder = self._run_main([], tmp_path)
+        onnx_builder.assert_called_once()
+        torch_builder.assert_not_called()
+
+    def test_ensemble_uses_torch_with_flag(self, tmp_path):
+        onnx_builder, torch_builder = self._run_main(["--use_torch"], tmp_path)
+        torch_builder.assert_called_once()
+        onnx_builder.assert_not_called()
+
+
+class TestResolveDeviceBackend:
+    """_resolve_device picks the ONNX backend for ensembles unless --use_torch."""
+
+    def _args(self, **overrides):
+        from tdsuite.cli import get_inference_parser
+        ns = get_inference_parser().parse_args(
+            ["--model_paths", "a", "b", "--text", "hello"]
+        )
+        for k, v in overrides.items():
+            setattr(ns, k, v)
+        return ns
+
+    def test_ensemble_without_torch_uses_onnx_backend(self):
+        import tdsuite.inference as inf
+        with patch("tdsuite.utils.onnx_inference.auto_select_device") as auto:
+            auto.return_value = "cpu"
+            inf._resolve_device(self._args(), use_torch=False)
+            assert auto.call_args.kwargs.get("backend") == "onnx"
+
+    def test_ensemble_with_torch_uses_torch_backend(self):
+        import tdsuite.inference as inf
+        with patch("tdsuite.utils.onnx_inference.auto_select_device") as auto:
+            auto.return_value = "cpu"
+            inf._resolve_device(self._args(), use_torch=True)
+            assert auto.call_args.kwargs.get("backend") == "torch"

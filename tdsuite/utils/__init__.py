@@ -3,7 +3,7 @@
 from .metrics import compute_metrics
 from .logging import setup_logging
 from .data_utils import load_dataset, preprocess_text
-from .onnx_inference import OnnxInferenceEngine
+from .onnx_inference import OnnxEnsembleInferenceEngine, OnnxInferenceEngine
 
 
 def __getattr__(name):
@@ -22,6 +22,7 @@ __all__ = [
     "load_dataset",
     "preprocess_text",
     "OnnxInferenceEngine",
+    "OnnxEnsembleInferenceEngine",
     "InferenceEngine",
     "EnsembleInferenceEngine",
 ]
