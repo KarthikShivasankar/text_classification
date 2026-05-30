@@ -22,18 +22,48 @@ def parse_args():
     return get_inference_parser().parse_args()
 
 
-def _resolve_device(args_device, use_torch: bool) -> str:
-    """Return the device string ('cpu' or 'cuda') to use."""
-    if args_device:
-        return args_device
-    if use_torch:
-        # Lazy-import torch only when explicitly requested
-        try:
-            import torch
-            return "cuda" if torch.cuda.is_available() else "cpu"
-        except ImportError:
-            return "cpu"
-    return "cpu"
+def _requested_device(args) -> "str | None":
+    """Resolve the explicitly-requested device from --device / --gpu / --cpu.
+
+    Returns ``"cpu"``, ``"cuda"``, or ``None`` (no explicit request → auto).
+    The convenience flags ``--gpu`` / ``--cpu`` map to ``cuda`` / ``cpu``.
+    If both ``--device`` and a convenience flag are given they must agree,
+    otherwise a clear ``ValueError`` is raised.
+    """
+    device = getattr(args, "device", None)
+    if device:
+        device = device.lower()
+
+    flag_device = None
+    if getattr(args, "gpu", False):
+        flag_device = "cuda"
+    elif getattr(args, "cpu", False):
+        flag_device = "cpu"
+
+    if device and flag_device and device != flag_device:
+        raise ValueError(
+            f"Conflicting device selection: --device {device} versus "
+            f"--{'gpu' if flag_device == 'cuda' else 'cpu'} "
+            f"(implies {flag_device}). Pass only one, or make them agree."
+        )
+
+    return device or flag_device
+
+
+def _resolve_device(args, use_torch: bool) -> str:
+    """Return the device string ('cpu' or 'cuda') to use.
+
+    Defaults to CPU. CUDA is auto-selected only when a capable GPU with
+    > 6 GB free VRAM is available for the active backend. An explicit
+    ``--device`` / ``--gpu`` / ``--cpu`` always takes precedence.
+    """
+    from tdsuite.utils.onnx_inference import auto_select_device
+
+    is_torch_backend = use_torch or bool(
+        getattr(args, "model_paths", None) or getattr(args, "model_names", None)
+    )
+    backend = "torch" if is_torch_backend else "onnx"
+    return auto_select_device(_requested_device(args), backend=backend)
 
 
 def _build_torch_engine(args, device: str):
@@ -151,7 +181,13 @@ def main():
     args = parse_args()
 
     use_torch = getattr(args, "use_torch", False)
-    device = _resolve_device(args.device, use_torch)
+    try:
+        device = _resolve_device(args, use_torch)
+    except ValueError as exc:
+        import sys
+
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(2)
 
     print(f"Device : {device}")
     print(f"Backend: {'torch' if use_torch else 'onnx'}")

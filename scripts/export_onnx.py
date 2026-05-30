@@ -44,7 +44,10 @@ def _get_parser():
 
 
 def export_to_onnx(model_path, model_name, output_path, max_length, opset):
-    """Export a HuggingFace sequence-classification model to ONNX.
+    """Export a HuggingFace sequence-classification model to a self-contained ONNX file.
+
+    Uses the shared TorchDynamo-based exporter (transformers>=5 compatible),
+    which produces a single portable ``model.onnx`` (no external data sidecar).
 
     Args:
         model_path: Local path to the model directory (or None).
@@ -53,64 +56,18 @@ def export_to_onnx(model_path, model_name, output_path, max_length, opset):
         max_length: Sequence length to use for the dummy input.
         opset: ONNX opset version.
     """
-    try:
-        import onnx  # noqa: F401 — import just to verify it is installed
-    except ImportError:
-        print(
-            "Error: 'onnx' is not installed.\n"
-            "Install it with:\n"
-            "  uv pip install onnx onnxruntime\n"
-            "  # or: pip install onnx onnxruntime",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+    from tdsuite.utils.onnx_inference import export_transformer_to_onnx
 
     source = model_path or model_name
     print(f"Loading model from: {source}")
-    tokenizer = AutoTokenizer.from_pretrained(source)
-    model = AutoModelForSequenceClassification.from_pretrained(source)
-    model.eval()
-
-    # Build a dummy input so torch.onnx.export can trace the graph
-    dummy_text = "example text for export"
-    dummy_inputs = tokenizer(
-        dummy_text,
-        return_tensors="pt",
-        padding="max_length",
+    export_transformer_to_onnx(
+        model_source=source,
+        output_path=output_path,
         max_length=max_length,
-        truncation=True,
+        opset=opset,
     )
 
-    input_names = list(dummy_inputs.keys())
-    output_names = ["logits"]
-
-    # Dynamic axes allow variable batch size and sequence length at runtime
-    dynamic_axes = {name: {0: "batch_size", 1: "sequence_length"} for name in input_names}
-    dynamic_axes["logits"] = {0: "batch_size"}
-
-    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-
-    print(f"Exporting to ONNX (opset {opset})...")
-    with torch.no_grad():
-        torch.onnx.export(
-            model,
-            tuple(dummy_inputs[k] for k in input_names),
-            output_path,
-            input_names=input_names,
-            output_names=output_names,
-            dynamic_axes=dynamic_axes,
-            opset_version=opset,
-            do_constant_folding=True,
-        )
-
-    # Save tokenizer alongside the ONNX file so the inference engine can find it
     onnx_dir = os.path.dirname(os.path.abspath(output_path))
-    tokenizer.save_pretrained(onnx_dir)
-
-    file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
-    print(f"Exported to {output_path} ({file_size_mb:.1f} MB)")
     print(f"Tokenizer saved to {onnx_dir}/")
     print(
         f"\nRun CPU inference:\n"

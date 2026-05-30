@@ -28,7 +28,7 @@ class InferenceEngine:
         model_path: Optional[str] = None,
         model_name: Optional[str] = None,
         max_length: int = 512,
-        device: str = "cuda" if torch.cuda.is_available() else "cpu",
+        device: Optional[str] = None,
     ):
         """
         Initialize the inference engine.
@@ -37,12 +37,16 @@ class InferenceEngine:
             model_path: Path to the model checkpoint or Hugging Face model name
             model_name: Optional model name for Hugging Face models
             max_length: Maximum sequence length
-            device: Device to use for inference
+            device: Device to use for inference. When ``None`` (default) the
+                device is auto-detected: CPU unless a CUDA GPU with > 6 GB free
+                VRAM is available.
         """
+        from tdsuite.utils.onnx_inference import auto_select_device
+
         self.model_path = model_path
         self.model_name = model_name or model_path
         self.max_length = max_length
-        self.device = device
+        self.device = auto_select_device(device, backend="torch")
         self.show_progress = True  # Default to showing progress bars
 
         # Load model and tokenizer
@@ -254,7 +258,7 @@ class EnsembleInferenceEngine:
         model_paths: Optional[List[str]] = None,
         model_names: Optional[List[str]] = None,
         max_length: int = 512,
-        device: str = "cuda" if torch.cuda.is_available() else "cpu",
+        device: Optional[str] = None,
         weights: Optional[List[float]] = None,
     ):
         """
@@ -264,9 +268,15 @@ class EnsembleInferenceEngine:
             model_paths: Paths to local model checkpoints
             model_names: Names of models on Hugging Face
             max_length: Maximum sequence length
-            device: Device to use for inference
+            device: Device to use for inference. When ``None`` (default) the
+                device is auto-detected: CPU unless a CUDA GPU with > 6 GB free
+                VRAM is available.
             weights: Optional weights for each model in the ensemble
         """
+        from tdsuite.utils.onnx_inference import auto_select_device
+
+        device = auto_select_device(device, backend="torch")
+
         print(f"Initializing EnsembleInferenceEngine with:")
         print(f"  model_paths: {model_paths}")
         print(f"  model_names: {model_names}")

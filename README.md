@@ -334,7 +334,7 @@ tdsuite-inference \
 
 ### Use Case 4 — Run without a GPU
 
-CPU inference is the **default** — no GPU, no PyTorch, no extra steps. All 21 pre-trained models ship a `model.onnx` file on Hugging Face Hub that downloads automatically on the first inference call.
+CPU inference is the **default** — no GPU, no PyTorch, no extra steps. All 17 pre-trained models ship a `model.onnx` file on Hugging Face Hub that downloads automatically on the first inference call.
 
 **Install (CPU — no GPU required)**
 
@@ -558,6 +558,10 @@ tdsuite-inference --model_name karths/binary_classification_train_TD \
 tdsuite-inference --model_name karths/binary_classification_train_TD \
     --device cuda --input_file issues.csv
 
+# --gpu / --cpu are convenience aliases for --device cuda / --device cpu
+tdsuite-inference --model_name karths/binary_classification_train_TD --gpu --input_file issues.csv
+tdsuite-inference --model_name karths/binary_classification_train_TD --cpu --input_file issues.csv
+
 # Local ONNX file (offline)
 tdsuite-inference --onnx_path models/td.onnx --input_file issues.csv
 
@@ -586,12 +590,32 @@ tdsuite-inference \
 | `--results_dir` | — | Custom results directory (default: timestamped subfolder) |
 | `--batch_size` | `32` | Inference batch size |
 | `--max_length` | `512` | Max token length |
-| `--device` | `cpu` | `cpu` (ONNX CPU) or `cuda` (ONNX GPU via CUDAExecutionProvider) |
+| `--device` | auto | `cpu` or `cuda`. Default *auto*: CPU unless a CUDA GPU with > 6 GB free VRAM is available (ONNX GPU also needs `onnxruntime-gpu`). An explicit value overrides auto-detection. |
+| `--gpu` | `false` | Convenience flag = `--device cuda`. Forces GPU (mutually exclusive with `--cpu`). |
+| `--cpu` | `false` | Convenience flag = `--device cpu`. Forces CPU (mutually exclusive with `--gpu`). |
 | `--weights` | — | Per-model weights for ensemble averaging |
 | `--disable_progress_bar` | `false` | Suppress tqdm bars |
 | `--track_emissions` | `true` | Record carbon emissions via CodeCarbon |
 
 > `--onnx_path`, `--model_path`, `--model_name`, `--model_paths`, and `--model_names` are mutually exclusive.
+
+#### Choosing CPU vs GPU
+
+By default the device is **auto-detected**: inference runs on **CPU** unless a CUDA GPU with **more than 6 GB of free VRAM** is available — and, for the default ONNX backend, only when `onnxruntime-gpu` (the `CUDAExecutionProvider`) is installed. You can always override this:
+
+```bash
+# Force CPU even if a capable GPU is present
+tdsuite-inference --model_name karths/binary_classification_train_TD --device cpu --input_file issues.csv
+tdsuite-inference --model_name karths/binary_classification_train_TD --cpu  --input_file issues.csv   # alias
+
+# Force GPU even if free VRAM is below the auto-detection threshold
+tdsuite-inference --model_name karths/binary_classification_train_TD --device cuda --input_file issues.csv
+tdsuite-inference --model_name karths/binary_classification_train_TD --gpu  --input_file issues.csv   # alias
+```
+
+- `--gpu` and `--cpu` are convenience aliases for `--device cuda` and `--device cpu`. They are mutually exclusive with each other, and if you pass both `--device` and a conflicting alias (e.g. `--device cpu --gpu`) the command exits with a clear error.
+- An explicit selection (`--device`, `--gpu`, or `--cpu`) always wins over the VRAM-based auto-detection.
+- **GPU ONNX inference requires `onnxruntime-gpu`** — install it with `pip install 'tdsuite[gpu]'`. CPU ONNX inference is the default and needs no extra packages (`pip install -e .`; export requires `pip install -e ".[onnx]"`). If you select `--device cuda` for the ONNX backend without `onnxruntime-gpu` installed, the engine prints a warning and transparently falls back to CPU.
 
 ---
 
@@ -600,6 +624,8 @@ tdsuite-inference \
 Export a custom or fine-tuned model to ONNX format. The 17 pre-trained models already have `model.onnx` on Hugging Face Hub — you only need this for your own fine-tuned models.
 
 > Requires: `pip install 'tdsuite[onnx]'` (adds `torch` + `onnx` + `onnxscript`)
+
+> **Exporter:** export uses the **TorchDynamo** exporter (`torch.onnx.export(..., dynamo=True)`), which is compatible with `transformers>=5` where the legacy TorchScript exporter fails on the new attention-mask code path. The exporter requires `onnxscript` (already included in the `[onnx]` extra). External weight data is consolidated back into a **single self-contained `model.onnx`** — there is no separate `.onnx.data` sidecar, so the file is portable and safe to share/upload.
 
 ```bash
 # Export a local fine-tuned checkpoint
@@ -1045,6 +1071,7 @@ tests/test_onnx_inference.py           ............. 23 passed
 | `scripts/extract_issue_bodies.py` | `test_extract_issue_bodies.py` | `clean_text` — code blocks, HTML, Markdown, URLs, emoji, whitespace; full CSV pipeline |
 | `tdsuite/utils/inference.py` | `test_inference.py` | `InferenceEngine` `predict_single`, `predict_batch`, `predict_from_file`; `EnsembleInferenceEngine` init, weight normalisation, `predict_single`, `predict_batch` — all mocked |
 | `tdsuite/utils/onnx_inference.py` | `test_onnx_inference.py` | `OnnxInferenceEngine` `predict_single`, `predict_batch`, `predict_from_file`; `from_pretrained` Hub-download path and `torch.onnx.export` fallback — all mocked |
+| `tdsuite/utils/onnx_inference.py`, `tdsuite/inference.py` | `test_onnx_device.py` | `auto_select_device` (ONNX & torch backends, VRAM threshold) and the CLI `--device`/`--gpu`/`--cpu` reconciliation in `_requested_device` — all probes monkeypatched, no real GPU |
 
 ### What each test file covers
 
@@ -1067,6 +1094,8 @@ tests/test_onnx_inference.py           ............. 23 passed
 **`tests/test_inference.py`** — patches `TransformerModel` and `AutoTokenizer` (for `InferenceEngine`) and `AutoModelForSequenceClassification`/`AutoTokenizer` (for `EnsembleInferenceEngine`) to avoid any network access or GPU requirement; verifies output structure, probability ranges, file I/O, and error handling.
 
 **`tests/test_onnx_inference.py`** — patches `onnxruntime.InferenceSession` and `AutoTokenizer` so no network or GPU is needed; verifies `OnnxInferenceEngine` output structure, probability ranges, file I/O (CSV, JSON, JSONL), error handling, and that `from_pretrained` calls `_export_to_onnx` when `model.onnx` is absent from the Hub.
+
+**`tests/test_onnx_device.py`** — monkeypatches the `onnxruntime`/`torch` CUDA probes and `_max_free_vram_gb` so device selection is deterministic and machine-independent; verifies `auto_select_device` honours explicit `cpu`/`cuda`, picks `cuda` only when the backend exposes CUDA *and* free VRAM exceeds the threshold, and that the CLI `--device`/`--gpu`/`--cpu` flags reconcile correctly (with conflicts raising a clear error).
 
 ---
 

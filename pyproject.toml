@@ -54,8 +54,10 @@ train = [
     "evaluate>=0.4.0",
 ]
 # ONNX model export (one-time operation, needs torch)
+# onnxscript powers the TorchDynamo exporter required for transformers>=5.
 onnx = [
     "onnx>=1.14.0",
+    "onnxscript>=0.7.0",
     "torch>=2.0.0",
 ]
 # optimum — on-the-fly ONNX export for models without a pre-exported model.onnx

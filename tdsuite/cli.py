@@ -150,7 +150,32 @@ def get_inference_parser() -> argparse.ArgumentParser:
         "--device",
         type=str,
         default=None,
-        help="Device to use for inference (cuda, cpu, or None for auto-detection)",
+        choices=["cpu", "cuda"],
+        help=(
+            "Device to use for inference. Default: auto — CPU unless a CUDA GPU "
+            "with > 6 GB free VRAM is available (and, for the ONNX backend, only "
+            "when onnxruntime-gpu / CUDAExecutionProvider is installed). "
+            "Pass 'cuda' to force GPU or 'cpu' to force CPU; an explicit value "
+            "always overrides the auto-detection. See also --gpu / --cpu."
+        ),
+    )
+    device_group = parser.add_mutually_exclusive_group()
+    device_group.add_argument(
+        "--gpu",
+        action="store_true",
+        help=(
+            "Convenience flag equivalent to --device cuda: force GPU inference "
+            "even when free VRAM is below the auto-detection threshold. "
+            "ONNX GPU requires onnxruntime-gpu (pip install 'tdsuite[gpu]')."
+        ),
+    )
+    device_group.add_argument(
+        "--cpu",
+        action="store_true",
+        help=(
+            "Convenience flag equivalent to --device cpu: force CPU inference "
+            "even when a capable CUDA GPU is available."
+        ),
     )
     parser.add_argument(
         "--weights", type=float, nargs="+", help="Weights for ensemble models"

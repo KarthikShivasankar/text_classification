@@ -1,4 +1,9 @@
-"""ONNX-based inference engine — CPU (default) and GPU via CUDAExecutionProvider."""
+"""ONNX-based inference engine — CPU (default) and GPU via CUDAExecutionProvider.
+
+Device policy: inference defaults to CPU. CUDA is selected automatically only
+when the ONNX CUDAExecutionProvider is available *and* a GPU exposes more than
+``GPU_VRAM_THRESHOLD_GB`` of free VRAM. An explicit ``device`` always wins.
+"""
 
 import os
 import sys
@@ -7,6 +12,12 @@ from typing import Dict, List, Optional, Union
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+
+# Default opset for the TorchDynamo-based exporter (transformers>=5 compatible).
+ONNX_OPSET = 18
+
+# CUDA is only auto-selected when a GPU exposes more free VRAM than this (GiB).
+GPU_VRAM_THRESHOLD_GB = 6.0
 
 
 def _require_onnxruntime():
@@ -26,6 +37,211 @@ def _require_onnxruntime():
             file=sys.stderr,
         )
         sys.exit(1)
+
+
+def _max_free_vram_gb() -> float:
+    """Return the free VRAM (GiB) of the most-free CUDA GPU, or 0.0 if none.
+
+    Tries torch first (no CUDA context is created by ``mem_get_info`` beyond a
+    lightweight device query), then falls back to parsing ``nvidia-smi``.
+    """
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            best = 0.0
+            for i in range(torch.cuda.device_count()):
+                free, _total = torch.cuda.mem_get_info(i)
+                best = max(best, free / (1024 ** 3))
+            return best
+    except Exception:
+        pass
+
+    try:
+        import subprocess
+
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if out.returncode == 0:
+            vals = []
+            for line in out.stdout.splitlines():
+                line = line.strip()
+                if line:
+                    try:
+                        vals.append(float(line))
+                    except ValueError:
+                        continue
+            if vals:
+                return max(vals) / 1024.0  # MiB -> GiB
+    except Exception:
+        pass
+
+    return 0.0
+
+
+def auto_select_device(
+    requested: Optional[str] = None,
+    backend: str = "onnx",
+    vram_threshold_gb: float = GPU_VRAM_THRESHOLD_GB,
+) -> str:
+    """Resolve the inference device string ('cpu' or 'cuda').
+
+    Args:
+        requested: Explicit device ('cpu'/'cuda'). When given it is honored
+            verbatim. When ``None``/empty the device is auto-detected.
+        backend: ``"onnx"`` checks for the ONNX CUDAExecutionProvider;
+            ``"torch"`` checks ``torch.cuda.is_available()``.
+        vram_threshold_gb: CUDA is only chosen when free VRAM exceeds this.
+
+    Returns:
+        ``"cuda"`` only when a capable GPU with > ``vram_threshold_gb`` free
+        VRAM is available for the given backend; otherwise ``"cpu"``.
+    """
+    if requested:
+        return requested.lower()
+
+    if backend == "torch":
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                return "cpu"
+        except Exception:
+            return "cpu"
+    else:
+        try:
+            import onnxruntime as ort
+
+            if "CUDAExecutionProvider" not in ort.get_available_providers():
+                return "cpu"
+        except Exception:
+            return "cpu"
+
+    return "cuda" if _max_free_vram_gb() > vram_threshold_gb else "cpu"
+
+
+def export_transformer_to_onnx(
+    model_source: str,
+    output_path: str,
+    max_length: int = 512,
+    token: Optional[str] = None,
+    opset: int = ONNX_OPSET,
+):
+    """Export a HF sequence-classification model to a single self-contained ONNX file.
+
+    Uses the TorchDynamo-based exporter (``torch.onnx.export(dynamo=True)``),
+    which is compatible with ``transformers>=5`` where the legacy TorchScript
+    exporter fails on the new attention-mask code path. The exporter writes
+    weights to an external ``.onnx.data`` sidecar; this function consolidates
+    everything back into one ``model.onnx`` (no sidecar) so the file is portable
+    and safe to upload to the Hugging Face Hub.
+
+    Requires ``torch``, ``onnx`` and ``onnxscript``.
+
+    Args:
+        model_source: Local model directory or HF model ID.
+        output_path: Destination ``.onnx`` file path.
+        max_length: Sequence length for the dummy tracing input.
+        token: Optional HF token for private/gated repos.
+        opset: ONNX opset version.
+
+    Returns:
+        Tuple ``(output_path, tokenizer)``.
+    """
+    import shutil
+    import tempfile
+
+    try:
+        import torch
+    except ImportError:
+        print(
+            "Error: exporting a model to ONNX requires 'torch'.\n"
+            "Install with: pip install torch\n"
+            "Or use a model that already has a working model.onnx on the Hub.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    try:
+        import onnx
+    except ImportError:
+        print(
+            "Error: exporting a model to ONNX requires the 'onnx' package.\n"
+            "Install with: pip install onnx  (or: pip install 'tdsuite[onnx]')",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    try:
+        import onnxscript  # noqa: F401 — required by the dynamo exporter
+    except ImportError:
+        print(
+            "Error: the ONNX dynamo exporter requires 'onnxscript'.\n"
+            "Install with: pip install onnxscript  (or: pip install 'tdsuite[onnx]')",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+    # The dynamo exporter requires a recent opset; clamp older requests up.
+    if opset < ONNX_OPSET:
+        opset = ONNX_OPSET
+
+    print(f"Exporting {model_source} -> ONNX (dynamo, opset {opset}) ...")
+    tokenizer = AutoTokenizer.from_pretrained(model_source, token=token)
+    model = AutoModelForSequenceClassification.from_pretrained(
+        model_source, token=token
+    )
+    model.eval()
+
+    dummy = tokenizer(
+        "example technical debt text for export",
+        return_tensors="pt",
+        padding="max_length",
+        truncation=True,
+        max_length=min(max_length, 128),
+    )
+    inputs = (dummy["input_ids"], dummy["attention_mask"])
+    input_names = ["input_ids", "attention_mask"]
+    dynamic_axes = {
+        "input_ids": {0: "batch", 1: "sequence"},
+        "attention_mask": {0: "batch", 1: "sequence"},
+        "logits": {0: "batch"},
+    }
+
+    tmp_dir = tempfile.mkdtemp(prefix="tdsuite_onnx_")
+    tmp_onnx = os.path.join(tmp_dir, "model.onnx")
+    try:
+        with torch.no_grad():
+            torch.onnx.export(
+                model,
+                inputs,
+                tmp_onnx,
+                input_names=input_names,
+                output_names=["logits"],
+                dynamic_axes=dynamic_axes,
+                opset_version=opset,
+                dynamo=True,
+            )
+
+        # Consolidate external weight data into a single self-contained file.
+        loaded = onnx.load(tmp_onnx)  # pulls .onnx.data into memory
+        out_dir = os.path.dirname(os.path.abspath(output_path))
+        os.makedirs(out_dir, exist_ok=True)
+        onnx.save_model(loaded, output_path, save_as_external_data=False)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    tokenizer.save_pretrained(os.path.dirname(os.path.abspath(output_path)))
+
+    size_mb = os.path.getsize(output_path) / (1024 * 1024)
+    print(f"Exported self-contained ONNX ({size_mb:.1f} MB) -> {output_path}")
+    return output_path, tokenizer
 
 
 class OnnxInferenceEngine:
@@ -49,7 +265,7 @@ class OnnxInferenceEngine:
         tokenizer_path: Optional[str] = None,
         max_length: int = 512,
         show_progress: bool = True,
-        device: str = "cpu",
+        device: Optional[str] = None,
     ):
         """
         Args:
@@ -58,8 +274,9 @@ class OnnxInferenceEngine:
                 tokenizer.  Defaults to the directory containing onnx_path.
             max_length: Maximum token sequence length.
             show_progress: Whether to show tqdm progress bars.
-            device: ``"cpu"`` (default) or ``"cuda"`` for GPU inference.
-                GPU requires ``onnxruntime-gpu`` to be installed.
+            device: ``"cpu"`` or ``"cuda"``. When ``None`` (default) the device
+                is auto-detected: CPU unless a CUDA GPU with > 6 GB free VRAM is
+                available. GPU requires ``onnxruntime-gpu`` to be installed.
         """
         ort = _require_onnxruntime()
 
@@ -69,7 +286,7 @@ class OnnxInferenceEngine:
         self.onnx_path = onnx_path
         self.max_length = max_length
         self.show_progress = show_progress
-        self.device = device.lower()
+        self.device = auto_select_device(device, backend="onnx")
 
         tok_source = tokenizer_path or os.path.dirname(os.path.abspath(onnx_path))
         self.tokenizer = self._load_tokenizer(tok_source)
@@ -82,6 +299,9 @@ class OnnxInferenceEngine:
 
         sess_opts = ort.SessionOptions()
         sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        # Silence benign "could not constant fold CastLike" warnings emitted by
+        # dynamo-exported graphs (severity: 3 = error and above only).
+        sess_opts.log_severity_level = 3
 
         self.session = ort.InferenceSession(
             onnx_path,
@@ -108,21 +328,23 @@ class OnnxInferenceEngine:
     def from_pretrained(
         cls,
         model_id: str,
-        device: str = "cpu",
+        device: Optional[str] = None,
         max_length: int = 512,
         show_progress: bool = True,
         token: Optional[str] = None,
     ) -> "OnnxInferenceEngine":
         """Download ``model.onnx`` from a Hugging Face Hub repository and load it.
 
-        If ``model.onnx`` is not present in the Hub repo, the method falls back
-        to exporting the model from its safetensors/PyTorch weights using
-        ``torch.onnx.export`` (requires ``torch`` and ``onnx`` to be installed).
+        If ``model.onnx`` is absent — or present but fails to load (e.g. it
+        references a missing external ``.onnx.data`` sidecar) — this method
+        falls back to exporting the model from its safetensors/PyTorch weights
+        (requires ``torch``, ``onnx`` and ``onnxscript``).
 
         Args:
             model_id: Hugging Face model ID, e.g.
                 ``"karths/binary_classification_train_TD"``.
-            device: ``"cpu"`` (default) or ``"cuda"`` for GPU inference.
+            device: ``"cpu"`` or ``"cuda"``. When ``None`` (default) the device
+                is auto-detected (CPU unless a CUDA GPU with > 6 GB free VRAM).
             max_length: Maximum token sequence length.
             show_progress: Whether to show tqdm progress bars.
             token: Optional Hugging Face API token for private repos.
@@ -143,7 +365,7 @@ class OnnxInferenceEngine:
         # Try to download pre-exported model.onnx from the Hub
         onnx_path = None
         try:
-            print(f"Downloading model.onnx from {model_id} …")
+            print(f"Downloading model.onnx from {model_id} ...")
             onnx_path = hf_hub_download(
                 repo_id=model_id,
                 filename="model.onnx",
@@ -152,9 +374,28 @@ class OnnxInferenceEngine:
         except Exception as hub_err:
             print(
                 f"model.onnx not found in {model_id} ({hub_err}). "
-                "Falling back to torch.onnx.export …",
+                "Falling back to ONNX export ...",
                 file=sys.stderr,
             )
+
+        # Try loading the downloaded file; if it is broken (missing external
+        # data, etc.), re-export a self-contained model instead.
+        if onnx_path is not None:
+            try:
+                return cls(
+                    onnx_path=onnx_path,
+                    tokenizer_path=model_id,
+                    max_length=max_length,
+                    show_progress=show_progress,
+                    device=device,
+                )
+            except Exception as load_err:
+                print(
+                    f"Downloaded model.onnx from {model_id} failed to load "
+                    f"({load_err}). Re-exporting a self-contained ONNX ...",
+                    file=sys.stderr,
+                )
+                onnx_path = None
 
         if onnx_path is None:
             onnx_path = cls._export_to_onnx(
@@ -177,10 +418,12 @@ class OnnxInferenceEngine:
         max_length: int = 512,
         token: Optional[str] = None,
     ) -> str:
-        """Export a HF model to ONNX using ``torch.onnx.export``.
+        """Export a HF model to a single self-contained ONNX file.
 
-        The resulting file is saved under the HF Hub cache so it can be reused
-        across calls.  Requires ``torch`` and ``onnx`` to be installed.
+        Delegates to :func:`export_transformer_to_onnx` (TorchDynamo exporter,
+        transformers>=5 compatible). The result is cached in a temp directory so
+        repeated calls within a session reuse it. Requires ``torch``, ``onnx``
+        and ``onnxscript``.
 
         Args:
             model_id: Hugging Face model ID.
@@ -190,102 +433,27 @@ class OnnxInferenceEngine:
         Returns:
             Path to the exported ``.onnx`` file.
         """
-        try:
-            import torch
-        except ImportError:
-            print(
-                "Error: exporting a model to ONNX requires 'torch'.\n"
-                "Install with:  pip install torch\n"
-                "Or use a model that already has model.onnx on the Hub.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+        import hashlib
+        import tempfile
 
-        try:
-            import onnx  # noqa: F401 — presence check only
-        except ImportError:
-            print(
-                "Error: exporting a model to ONNX requires the 'onnx' package.\n"
-                "Install with:  pip install onnx\n"
-                "Or: pip install 'tdsuite[onnx]'",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
-        from transformers import AutoModelForSequenceClassification, AutoTokenizer
-        import tempfile, pathlib
-
-        print(f"Exporting {model_id} → ONNX (this may take a moment) …")
-
-        tokenizer = AutoTokenizer.from_pretrained(model_id, token=token)
-        model = AutoModelForSequenceClassification.from_pretrained(
-            model_id, token=token
+        # Deterministic cache location per model id so a session reuses it.
+        digest = hashlib.md5(model_id.encode("utf-8")).hexdigest()[:12]
+        cache_dir = os.path.join(
+            tempfile.gettempdir(), f"tdsuite_onnx_{digest}"
         )
-        model.eval()
+        os.makedirs(cache_dir, exist_ok=True)
+        onnx_path = os.path.join(cache_dir, "model.onnx")
 
-        dummy = tokenizer(
-            "dummy input text",
-            return_tensors="pt",
-            padding="max_length",
-            truncation=True,
-            max_length=min(max_length, 128),
+        if os.path.exists(onnx_path) and os.path.getsize(onnx_path) > 0:
+            print(f"Reusing cached ONNX export: {onnx_path}")
+            return onnx_path
+
+        export_transformer_to_onnx(
+            model_source=model_id,
+            output_path=onnx_path,
+            max_length=max_length,
+            token=token,
         )
-        input_ids = dummy["input_ids"]
-        attention_mask = dummy["attention_mask"]
-
-        # Determine which inputs the model actually expects
-        try:
-            sig = model.forward.__code__.co_varnames
-            has_token_type = "token_type_ids" in sig and "token_type_ids" in dummy
-        except Exception:
-            has_token_type = False
-
-        if has_token_type and "token_type_ids" in dummy:
-            model_inputs = (input_ids, attention_mask, dummy["token_type_ids"])
-            input_names = ["input_ids", "attention_mask", "token_type_ids"]
-            dynamic_axes = {
-                "input_ids": {0: "batch", 1: "sequence"},
-                "attention_mask": {0: "batch", 1: "sequence"},
-                "token_type_ids": {0: "batch", 1: "sequence"},
-                "logits": {0: "batch"},
-            }
-        else:
-            model_inputs = (input_ids, attention_mask)
-            input_names = ["input_ids", "attention_mask"]
-            dynamic_axes = {
-                "input_ids": {0: "batch", 1: "sequence"},
-                "attention_mask": {0: "batch", 1: "sequence"},
-                "logits": {0: "batch"},
-            }
-
-        # Cache alongside HF Hub snapshots so we don't re-export every time
-        try:
-            from huggingface_hub import snapshot_download
-
-            cache_dir = pathlib.Path(
-                snapshot_download(
-                    model_id,
-                    token=token,
-                    ignore_patterns=["*.safetensors", "*.bin", "flax_model*"],
-                )
-            )
-        except Exception:
-            cache_dir = pathlib.Path(tempfile.mkdtemp(prefix="tdsuite_onnx_"))
-
-        onnx_path = str(cache_dir / "model.onnx")
-
-        with torch.no_grad():
-            torch.onnx.export(
-                model,
-                model_inputs,
-                onnx_path,
-                opset_version=17,
-                input_names=input_names,
-                output_names=["logits"],
-                dynamic_axes=dynamic_axes,
-            )
-
-        print(f"ONNX model saved to {onnx_path}")
         return onnx_path
 
     # ------------------------------------------------------------------
