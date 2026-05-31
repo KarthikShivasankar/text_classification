@@ -1182,6 +1182,20 @@ If you use TD-Suite in your research, please cite:
 
 This section is for contributors and maintainers of the `tdsuite` package itself. See also [`AGENTS.md`](AGENTS.md) (quick reference for AI agents/contributors) and [`CLAUDE.md`](CLAUDE.md) (architecture deep-dive).
 
+**Maintainer quick reference:**
+
+```bash
+# 1. One-time: set up the dev environment
+uv venv && uv pip install -e ".[dev,test]"
+
+# 2. Before every commit — run what CI runs
+ruff check tdsuite/ scripts/ && black --check tdsuite/ scripts/ \
+  && isort --check-only tdsuite/ scripts/ && flake8 tdsuite/ scripts/ && pytest
+
+# 3. Cut a release (see "Releasing to PyPI" below)
+#    bump __version__ in tdsuite/__init__.py  →  commit & push  →  tag  →  GitHub Release
+```
+
 ### Dev environment setup
 
 ```bash
@@ -1264,6 +1278,26 @@ gh release create vX.Y.Z --generate-notes
 
 > The version lives only in `tdsuite/__init__.py` (`pyproject.toml` uses `dynamic = ["version"]`).
 > **PyPI versions are immutable** — a version can never be re-uploaded, so always bump before releasing.
+
+**Manual release (fallback, until Trusted Publishing is configured):**
+
+If the one-time Trusted Publishing setup above is not yet done, you can publish from a
+local machine with an [API token](https://pypi.org/manage/account/token/):
+
+```bash
+# 1. Bump tdsuite/__init__.py __version__, commit, and push to main
+# 2. Build a clean set of artifacts and validate metadata
+rm -rf dist build
+python -m build
+twine check dist/*
+
+# 3. Upload (username is the literal string __token__)
+twine upload dist/* -u __token__ -p "pypi-<your-token>"
+#    or set TWINE_USERNAME=__token__ / TWINE_PASSWORD=pypi-... in the environment
+```
+
+> Prefer Trusted Publishing once configured — it avoids storing long-lived tokens.
+> If a token is ever exposed (e.g. pasted into a chat), revoke it immediately on PyPI.
 
 ### Updating the documentation
 
