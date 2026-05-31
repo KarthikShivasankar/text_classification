@@ -1,9 +1,9 @@
 """Configuration classes for technical debt classification."""
 
-import os
 import json
-from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional, Union, Any
+import os
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -20,8 +20,11 @@ class ModelConfig:
         """Convert to dictionary."""
         config_dict = asdict(self)
         # Convert device to string if it's a torch.device object
-        if hasattr(config_dict['device'], '__class__') and config_dict['device'].__class__.__name__ == 'device':
-            config_dict['device'] = str(config_dict['device'])
+        if (
+            hasattr(config_dict["device"], "__class__")
+            and config_dict["device"].__class__.__name__ == "device"
+        ):
+            config_dict["device"] = str(config_dict["device"])
         return config_dict
 
     def save(self, output_dir: str):
@@ -34,7 +37,7 @@ class ModelConfig:
             with open(output_dir, "w") as f:
                 json.dump(self.to_dict(), f, indent=4)
         else:
-            # It's a directory path, create it and save the configuration to a file in it
+            # It's a directory path: create it and save the config inside
             os.makedirs(output_dir, exist_ok=True)
             with open(os.path.join(output_dir, "model_config.json"), "w") as f:
                 json.dump(self.to_dict(), f, indent=4)
@@ -93,7 +96,7 @@ class TrainingConfig:
             with open(output_dir, "w") as f:
                 json.dump(self.to_dict(), f, indent=4)
         else:
-            # It's a directory path, create it and save the configuration to a file in it
+            # It's a directory path: create it and save the config inside
             os.makedirs(output_dir, exist_ok=True)
             with open(os.path.join(output_dir, "training_config.json"), "w") as f:
                 json.dump(self.to_dict(), f, indent=4)
@@ -119,16 +122,16 @@ class DataConfig:
     train_file: Optional[str] = None
     validation_file: Optional[str] = None
     test_file: Optional[str] = None
-    
+
     # Hugging Face dataset
     dataset_name: Optional[str] = None
     dataset_config_name: Optional[str] = None
     dataset_split: str = "train"
-    
+
     # Column names
     text_column: str = "text"
     label_column: str = "label"
-    
+
     # Data processing
     max_length: int = 512
     max_train_samples: Optional[int] = None
@@ -137,10 +140,10 @@ class DataConfig:
     test_size: float = 0.15
     random_state: int = 42
     n_splits: int = 5
-    
+
     # Class balancing
     balance_classes: bool = False
-    
+
     # Repository extraction
     extract_top_repo: bool = False
     repo_column: Optional[str] = None
@@ -159,7 +162,7 @@ class DataConfig:
             with open(output_dir, "w") as f:
                 json.dump(self.to_dict(), f, indent=4)
         else:
-            # It's a directory path, create it and save the configuration to a file in it
+            # It's a directory path: create it and save the config inside
             os.makedirs(output_dir, exist_ok=True)
             with open(os.path.join(output_dir, "data_config.json"), "w") as f:
                 json.dump(self.to_dict(), f, indent=4)
@@ -201,7 +204,7 @@ class InferenceConfig:
             with open(output_dir, "w") as f:
                 json.dump(self.to_dict(), f, indent=4)
         else:
-            # It's a directory path, create it and save the configuration to a file in it
+            # It's a directory path: create it and save the config inside
             os.makedirs(output_dir, exist_ok=True)
             with open(os.path.join(output_dir, "inference_config.json"), "w") as f:
                 json.dump(self.to_dict(), f, indent=4)
@@ -238,7 +241,7 @@ class Config:
             "data": self.data.to_dict(),
             "inference": self.inference.to_dict(),
             "category": self.category,
-            "categories": self.categories
+            "categories": self.categories,
         }
 
     def save(self, output_dir: str):
@@ -251,7 +254,7 @@ class Config:
             with open(output_dir, "w") as f:
                 json.dump(self.to_dict(), f, indent=4)
         else:
-            # It's a directory path, create it and save the configuration to a file in it
+            # It's a directory path: create it and save the config inside
             os.makedirs(output_dir, exist_ok=True)
             with open(os.path.join(output_dir, "config.json"), "w") as f:
                 json.dump(self.to_dict(), f, indent=4)
@@ -265,7 +268,7 @@ class Config:
             data=DataConfig.from_dict(config_dict.get("data", {})),
             inference=InferenceConfig.from_dict(config_dict.get("inference", {})),
             category=config_dict.get("category"),
-            categories=config_dict.get("categories")
+            categories=config_dict.get("categories"),
         )
 
     @classmethod
@@ -273,4 +276,4 @@ class Config:
         """Load a configuration from a JSON file."""
         with open(config_path, "r") as f:
             config_dict = json.load(f)
-        return cls.from_dict(config_dict) 
+        return cls.from_dict(config_dict)

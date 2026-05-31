@@ -9,10 +9,12 @@ Usage:
     python scripts/export_onnx.py --model_path outputs/binary --output model.onnx
 
     # From a Hugging Face model
-    python scripts/export_onnx.py --model_name karths/binary_classification_train_TD --output model.onnx
+    python scripts/export_onnx.py \\
+        --model_name karths/binary_classification_train_TD --output model.onnx
 
     # Then run inference with the exported model
-    tdsuite-inference --onnx_path model.onnx --model_path outputs/binary --input_file issue_texts.csv
+    tdsuite-inference --onnx_path model.onnx --model_path outputs/binary \\
+        --input_file issue_texts.csv
 
 Requirements:
     uv pip install onnx onnxruntime
@@ -21,14 +23,12 @@ Requirements:
 """
 
 import os
-import sys
-
-import torch
 
 
 def _get_parser():
     try:
         from tdsuite.cli import get_export_onnx_parser
+
         return get_export_onnx_parser()
     except ImportError:
         import argparse
@@ -39,7 +39,9 @@ def _get_parser():
         g.add_argument("--model_name", help="Hugging Face model name")
         p.add_argument("--output", required=True, help="Output .onnx file path")
         p.add_argument("--max_length", type=int, default=512)
-        p.add_argument("--opset", type=int, default=14, help="ONNX opset version (default: 14)")
+        p.add_argument(
+            "--opset", type=int, default=14, help="ONNX opset version (default: 14)"
+        )
         return p
 
 

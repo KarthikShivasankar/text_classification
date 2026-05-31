@@ -3,7 +3,6 @@
 import torch
 import torch.nn as nn
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
-from typing import Dict, List, Optional, Union, Any
 
 
 def load_model_and_tokenizer(model_name: str, num_labels: int, max_length: int = 512):
@@ -85,7 +84,12 @@ class BaseModel(nn.Module):
 
     @classmethod
     def from_pretrained(
-        cls, model_path: str, num_labels: int, max_length: int = 512, class_weights=None, device=None
+        cls,
+        model_path: str,
+        num_labels: int,
+        max_length: int = 512,
+        class_weights=None,
+        device=None,
     ):
         """
         Load a model from disk.
@@ -102,10 +106,11 @@ class BaseModel(nn.Module):
         """
         # Create a TransformerModel instance
         from .transformer import TransformerModel
+
         return TransformerModel(
             model_name=model_path,
             num_labels=num_labels,
             max_length=max_length,
             class_weights=class_weights,
-            device=device
-        ) 
+            device=device,
+        )

@@ -52,7 +52,7 @@ def _max_free_vram_gb() -> float:
             best = 0.0
             for i in range(torch.cuda.device_count()):
                 free, _total = torch.cuda.mem_get_info(i)
-                best = max(best, free / (1024 ** 3))
+                best = max(best, free / (1024**3))
             return best
     except Exception:
         pass
@@ -255,8 +255,9 @@ class OnnxInferenceEngine:
         engine = OnnxInferenceEngine("model.onnx")
 
     Auto-download from Hugging Face Hub:
-        engine = OnnxInferenceEngine.from_pretrained("karths/binary_classification_train_TD")
-        engine = OnnxInferenceEngine.from_pretrained("karths/binary_classification_train_TD", device="cuda")
+        model_id = "karths/binary_classification_train_TD"
+        engine = OnnxInferenceEngine.from_pretrained(model_id)
+        engine = OnnxInferenceEngine.from_pretrained(model_id, device="cuda")
     """
 
     def __init__(
@@ -438,9 +439,7 @@ class OnnxInferenceEngine:
 
         # Deterministic cache location per model id so a session reuses it.
         digest = hashlib.md5(model_id.encode("utf-8")).hexdigest()[:12]
-        cache_dir = os.path.join(
-            tempfile.gettempdir(), f"tdsuite_onnx_{digest}"
-        )
+        cache_dir = os.path.join(tempfile.gettempdir(), f"tdsuite_onnx_{digest}")
         os.makedirs(cache_dir, exist_ok=True)
         onnx_path = os.path.join(cache_dir, "model.onnx")
 
@@ -506,7 +505,9 @@ class OnnxInferenceEngine:
         num_batches = (len(texts) + batch_size - 1) // batch_size
         batches = range(0, len(texts), batch_size)
         if self.show_progress:
-            batches = tqdm(batches, total=num_batches, desc="ONNX inference", unit="batch")
+            batches = tqdm(
+                batches, total=num_batches, desc="ONNX inference", unit="batch"
+            )
 
         for i in batches:
             batch_texts = texts[i : i + batch_size]

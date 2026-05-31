@@ -21,10 +21,10 @@ os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
-import numpy as np
-import onnxruntime as ort
-from huggingface_hub import hf_hub_download
-from transformers import AutoTokenizer
+import numpy as np  # noqa: E402
+import onnxruntime as ort  # noqa: E402
+from huggingface_hub import hf_hub_download  # noqa: E402
+from transformers import AutoTokenizer  # noqa: E402
 
 TDSUITE_MODELS = [
     "karths/binary_classification_train_TD",
@@ -46,16 +46,16 @@ TDSUITE_MODELS = [
     "karths/binary_classification_train_port",
 ]
 
-SAMPLE = "The authentication module has no rate limiting and stores passwords in plain text."
+SAMPLE = (
+    "The authentication module has no rate limiting and stores passwords in plain text."
+)
 
 
 def _clear_cached_onnx(model_id: str):
     """Delete any locally cached model.onnx blobs/snapshots for a fresh pull."""
     from huggingface_hub.constants import HF_HUB_CACHE
 
-    repo_dir = os.path.join(
-        HF_HUB_CACHE, "models--" + model_id.replace("/", "--")
-    )
+    repo_dir = os.path.join(HF_HUB_CACHE, "models--" + model_id.replace("/", "--"))
     shutil.rmtree(repo_dir, ignore_errors=True)
 
 
@@ -116,14 +116,20 @@ def verify_one(model_id: str, fresh: bool) -> dict:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--fresh", action="store_true", help="Clear cache and re-download each model.onnx")
+    ap.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Clear cache and re-download each model.onnx",
+    )
     ap.add_argument("--model", help="Verify a single model ID")
     args = ap.parse_args()
 
     models = [args.model] if args.model else TDSUITE_MODELS
     print("=" * 64)
-    print(f"Verifying ONNX CPU inference for {len(models)} model(s) "
-          f"(fresh={args.fresh})")
+    print(
+        f"Verifying ONNX CPU inference for {len(models)} model(s) "
+        f"(fresh={args.fresh})"
+    )
     print("=" * 64)
 
     results = [verify_one(m, args.fresh) for m in models]

@@ -18,7 +18,6 @@ Usage:
 """
 
 import csv
-import os
 import sys
 import time
 
@@ -57,14 +56,17 @@ def _handle_response_error(response, repo):
                 f"  • Authenticated limit:   5000 requests/hour\n"
                 f"  • Limit resets in approximately {wait_min:.0f} minute(s).\n"
                 f"\nFix: supply a personal access token:\n"
-                f"  python scripts/fetch_github_issues.py --repo {repo} --token $GITHUB_TOKEN\n"
+                f"  python scripts/fetch_github_issues.py "
+                f"--repo {repo} --token $GITHUB_TOKEN\n"
                 f"Create one at https://github.com/settings/tokens",
                 file=sys.stderr,
             )
         else:
             print(
-                f"Error: Access forbidden (HTTP 403). The repository may be private.\n"
-                f"If it is private, supply --token with a token that has repo access.",
+                "Error: Access forbidden (HTTP 403). The repository may "
+                "be private.\n"
+                "If it is private, supply --token with a token that has "
+                "repo access.",
                 file=sys.stderr,
             )
         sys.exit(1)
@@ -84,9 +86,13 @@ def _check_rate_limit(response, repo):
     if remaining < 5:
         reset_ts = int(response.headers.get("X-RateLimit-Reset", 0))
         wait = max(0, reset_ts - time.time()) + 2
-        token_hint = "" if response.request.headers.get("Authorization") else (
-            f"\nTip: use --token to raise the limit to 5000 req/h. "
-            f"Create one at https://github.com/settings/tokens"
+        token_hint = (
+            ""
+            if response.request.headers.get("Authorization")
+            else (
+                "\nTip: use --token to raise the limit to 5000 req/h. "
+                "Create one at https://github.com/settings/tokens"
+            )
         )
         tqdm.write(
             f"Rate limit almost exhausted ({remaining} calls left). "
@@ -133,7 +139,9 @@ def fetch_issues(repo, state, token, limit, fetch_all):
                 "direction": "desc",
             }
 
-            response = requests.get(base_url, headers=headers, params=params, timeout=30)
+            response = requests.get(
+                base_url, headers=headers, params=params, timeout=30
+            )
             if not response.ok:
                 _handle_response_error(response, repo)
 
@@ -198,6 +206,7 @@ def write_csv(issues, output_path):
 def _get_parser():
     try:
         from tdsuite.cli import get_fetch_issues_parser
+
         return get_fetch_issues_parser()
     except ImportError:
         import argparse
@@ -234,7 +243,8 @@ def main():
     print(f"Done. Saved to {args.output}")
     print(
         f"\nNext step — clean the body text:\n"
-        f"  python scripts/extract_issue_bodies.py --input {args.output} --output issue_texts.csv"
+        f"  python scripts/extract_issue_bodies.py "
+        f"--input {args.output} --output issue_texts.csv"
     )
 
 

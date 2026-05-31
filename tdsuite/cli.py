@@ -60,9 +60,7 @@ def get_train_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--learning_rate", type=float, default=2e-5, help="Learning rate"
     )
-    parser.add_argument(
-        "--weight_decay", type=float, default=0.01, help="Weight decay"
-    )
+    parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay")
     parser.add_argument(
         "--warmup_steps", type=int, default=500, help="Number of warmup steps"
     )
@@ -106,9 +104,7 @@ def get_inference_parser() -> argparse.ArgumentParser:
 
     # Model arguments
     model_group = parser.add_mutually_exclusive_group(required=True)
-    model_group.add_argument(
-        "--model_path", type=str, help="Path to a local model"
-    )
+    model_group.add_argument("--model_path", type=str, help="Path to a local model")
     model_group.add_argument(
         "--model_name", type=str, help="Name of a model on Hugging Face"
     )
@@ -132,7 +128,9 @@ def get_inference_parser() -> argparse.ArgumentParser:
     # Output arguments
     parser.add_argument("--output_file", type=str, help="Path to save predictions")
     parser.add_argument(
-        "--results_dir", type=str, help="Directory to store inference results and metrics"
+        "--results_dir",
+        type=str,
+        help="Directory to store inference results and metrics",
     )
     parser.add_argument(
         "--text_column",
@@ -347,7 +345,7 @@ def get_fetch_issues_parser() -> argparse.ArgumentParser:
         "--all",
         action="store_true",
         dest="fetch_all",
-        help="Fetch every issue (paginates through all pages). May be slow for large repos.",
+        help="Fetch every issue (paginates through all pages); slow for large repos.",
     )
     limit_group.add_argument(
         "--limit",

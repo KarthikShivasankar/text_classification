@@ -6,11 +6,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **TDSuite** is a text classification framework specialized for Technical Debt (TD) detection using transformer models. It supports binary classification, cross-validation, ensemble inference, and carbon emissions tracking. Models are shared on Hugging Face under the `karths/` namespace.
 
-**Default inference backend is ONNX (CPU) — PyTorch is optional** (needed only for training or explicit GPU inference).
+**Default inference backend is ONNX (CPU) — PyTorch is optional** (needed only for training or explicit GPU inference). Requires **Python ≥ 3.9**.
 
 ## Commands
 
-### Installation (UV — preferred)
+### Installation (from PyPI)
+```bash
+pip install tdsuite            # CPU inference (ONNX) — no torch required
+pip install "tdsuite[gpu]"     # + GPU inference (onnxruntime-gpu + torch CUDA 12.4)
+pip install "tdsuite[train]"   # + full training stack
+pip install "tdsuite[onnx]"    # + onnx/onnxscript for exporting custom models
+```
+
+### Installation (UV — preferred for development)
 ```bash
 uv venv && uv sync           # CPU inference (ONNX) — no torch required
 uv pip install -e ".[gpu]"   # + GPU inference (onnxruntime-gpu + torch CUDA 12.4)
@@ -141,4 +149,7 @@ pytest --cov=tdsuite       # config in pyproject.toml [tool.pytest.ini_options]
 - Inference outputs land in a timestamped subdirectory (`inference_YYYYMMDD_HHMMSS/`) under the model's output directory.
 - Carbon emissions are tracked per-run via CodeCarbon and saved as `emissions.csv`/`emissions.json`.
 - All `argparse` parsers live in `tdsuite/cli.py` — add new parameters there, not in the script files.
-- `pyproject.toml` is the single source of truth for packaging, tool config (black, isort, pytest), and optional dependency groups (`gpu`, `train`, `onnx`, `optimum`, `dev`, `test`).
+- `pyproject.toml` is the single source of truth for packaging, tool config (black, isort, pytest), and optional dependency groups (`gpu`, `train`, `onnx`, `optimum`, `dev`, `test`). There is no `setup.py` — packaging is fully PEP 621.
+- **Version is single-sourced**: `pyproject.toml` declares `dynamic = ["version"]` and reads it from `tdsuite.__version__` (`tdsuite/__init__.py`). Bump the version in `__init__.py` only.
+- **Core install stays torch/datasets-free**: modules in the default import path (`tdsuite.inference`, `tdsuite.utils.onnx_inference`, `tdsuite.split_data`) must not import `torch`, `datasets`, `codecarbon`, etc. at top level. The `datasets` import in `data_utils.py`/`data_splitter.py` and the PyTorch engines in `utils/inference.py` are lazy-loaded (via in-function imports and `__getattr__` in `tdsuite/utils/__init__.py` and `tdsuite/data/__init__.py`), so `pip install tdsuite` (ONNX-only) imports cleanly.
+- **Lint/format**: run `black tdsuite/ scripts/`, `isort tdsuite/ scripts/`, `flake8 tdsuite/ scripts/` — the tree is kept clean (intentional pre-import statements are marked `# noqa: E402`).

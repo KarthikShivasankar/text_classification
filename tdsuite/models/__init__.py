@@ -3,4 +3,4 @@
 from .base import BaseModel
 from .transformer import TransformerModel
 
-__all__ = ["BaseModel", "TransformerModel"] 
+__all__ = ["BaseModel", "TransformerModel"]

@@ -72,9 +72,24 @@ A suite for detecting and classifying **technical debt** in software repositorie
 
 ## Installation
 
-> **Default backend is ONNX (CPU).** PyTorch and CUDA are optional extras — only needed for training or explicit GPU inference.
+> **Default backend is ONNX (CPU).** PyTorch and CUDA are optional extras — only needed for training or explicit GPU inference. Requires **Python ≥ 3.9**.
 
-### With UV (recommended)
+### From PyPI (recommended for users)
+
+```bash
+pip install tdsuite                 # CPU inference (ONNX) — no GPU / PyTorch required
+pip install "tdsuite[gpu]"          # + GPU inference (onnxruntime-gpu + torch CUDA 12.4)
+pip install "tdsuite[train]"        # + full training stack (torch, codecarbon, evaluate…)
+pip install "tdsuite[onnx]"         # + onnx/onnxscript for exporting your own models
+```
+
+```bash
+# Classify a single string — model.onnx auto-downloads from Hugging Face Hub
+tdsuite-inference --model_name karths/binary_classification_train_TD \
+    --text "The auth module has no rate limiting"
+```
+
+### From source — with UV (recommended for development)
 
 [UV](https://docs.astral.sh/uv/) is a fast Python package manager that replaces pip + venv.
 
@@ -105,7 +120,7 @@ uv pip install "optimum[onnxruntime]" "transformers<5"
 
 > After `uv venv`, set your IDE's Python interpreter to `.venv/Scripts/python.exe` (Windows) or `.venv/bin/python` (Linux/Mac) so imports resolve correctly.
 
-### With pip
+### From source — with pip
 
 ```bash
 git clone https://github.com/KarthikShivasankar/text_classification
@@ -1080,18 +1095,20 @@ pytest --cov=tdsuite --cov-report=term-missing --cov-report=html
 pytest -m "not slow" -v
 ```
 
-**Expected output (all passing):**
+**Expected output (all passing — 235 tests):**
 
 ```
-tests/test_cli.py                      ............. 35 passed
-tests/test_config.py                   ............. 22 passed
+tests/test_cli.py                      ............. 32 passed
+tests/test_config.py                   ............. 21 passed
 tests/test_data_splitter.py            ............. 17 passed
-tests/test_data_utils.py               ............. 10 passed
-tests/test_dataset.py                  ............. 22 passed
-tests/test_extract_issue_bodies.py     ............. 20 passed
-tests/test_inference.py                ............. 22 passed
-tests/test_metrics.py                  ............. 14 passed
-tests/test_onnx_inference.py           ............. 23 passed
+tests/test_data_utils.py               ............. 13 passed
+tests/test_dataset.py                  ............. 20 passed
+tests/test_extract_issue_bodies.py     ............. 26 passed
+tests/test_inference.py                ............. 32 passed
+tests/test_metrics.py                  ............. 13 passed
+tests/test_onnx_device.py              ............. 20 passed
+tests/test_onnx_inference.py           ............. 41 passed
+=========================== 235 passed ===========================
 ```
 
 ### Test coverage by module

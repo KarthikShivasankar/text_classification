@@ -1,1 +1,1 @@
-"""Configuration classes for technical debt classification.""" 
+"""Configuration classes for technical debt classification."""

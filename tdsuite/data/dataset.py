@@ -1,14 +1,11 @@
 """Dataset classes for technical debt classification."""
 
 import os
-import torch
-from torch.utils.data import Dataset
+
 import pandas as pd
-import numpy as np
-from sklearn.model_selection import train_test_split, StratifiedKFold
-from typing import Dict, List, Tuple, Optional, Union, Any
+import torch
 from datasets import load_dataset
-from transformers import PreTrainedTokenizer
+from torch.utils.data import Dataset
 
 
 class TDDataset(Dataset):
@@ -62,36 +59,44 @@ class TDProcessor:
             # Load from Hugging Face dataset
             dataset = load_dataset(data_file)
             df = pd.DataFrame(dataset["train"])
-        
+
         return df
 
     def create_dataset(self, data, text_column="text", label_column="label"):
         """Create a PyTorch dataset from the data."""
         texts = data[text_column].tolist()
         labels = data[label_column].tolist()
-        
+
         # Tokenize texts
         encodings = self.tokenizer(
             texts,
             truncation=True,
             padding=True,
             max_length=self.max_length,
-            return_tensors="pt"
+            return_tensors="pt",
         )
-        
+
         return TDDataset(encodings, labels)
 
 
 class BinaryTDProcessor(TDProcessor):
     """Processor for binary technical debt classification."""
 
-    def prepare_binary_data(self, data, positive_category=None, text_column="text", label_column="label", numeric_labels=False):
+    def prepare_binary_data(
+        self,
+        data,
+        positive_category=None,
+        text_column="text",
+        label_column="label",
+        numeric_labels=False,
+    ):
         """
         Prepare data for binary classification.
 
         Args:
             data: The data to process
-            positive_category: The category to consider as positive (ignored if numeric_labels=True)
+            positive_category: Category to treat as positive (ignored if
+                numeric_labels=True)
             text_column: The column containing the text
             label_column: The column containing the labels
             numeric_labels: Whether the labels are already numeric (0 or 1)
@@ -107,8 +112,10 @@ class BinaryTDProcessor(TDProcessor):
             df["label_idx"] = df[label_column].astype(int)
         else:
             if positive_category is None:
-                raise ValueError("positive_category must be specified when numeric_labels=False")
-            
+                raise ValueError(
+                    "positive_category must be specified when numeric_labels=False"
+                )
+
             # Convert labels to binary (0 or 1)
             df["label_idx"] = (df[label_column] == positive_category).astype(int)
 
@@ -186,7 +193,11 @@ class BinaryTDProcessor(TDProcessor):
             category_remaining = category_df[category_df[repo_col] != top_repo].copy()
 
             # Update dataframes
-            top_repo_data = pd.concat([top_repo_data, category_top_repo], ignore_index=True)
-            remaining_data = pd.concat([remaining_data, category_remaining], ignore_index=True)
+            top_repo_data = pd.concat(
+                [top_repo_data, category_top_repo], ignore_index=True
+            )
+            remaining_data = pd.concat(
+                [remaining_data, category_remaining], ignore_index=True
+            )
 
-        return remaining_data, top_repo_data 
+        return remaining_data, top_repo_data

@@ -24,6 +24,7 @@ from tqdm import tqdm
 def _get_parser():
     try:
         from tdsuite.cli import get_extract_issues_parser
+
         return get_extract_issues_parser()
     except ImportError:
         import argparse
@@ -63,7 +64,7 @@ def clean_text(text: str) -> str:
     text = re.sub(r"^\s*>+.*$", "", text, flags=re.MULTILINE)
 
     # 6. Remove markdown images and links, keep only link text
-    text = re.sub(r"!\[.*?\]\(.*?\)", " ", text)       # ![alt](url)
+    text = re.sub(r"!\[.*?\]\(.*?\)", " ", text)  # ![alt](url)
     text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)  # [text](url) → text
     text = re.sub(r"\[([^\]]*)\]\[[^\]]*\]", r"\1", text)  # [text][ref] → text
 
@@ -90,17 +91,17 @@ def clean_text(text: str) -> str:
     # 13. Remove emoji characters (covers all Unicode emoji / pictograph ranges)
     text = re.sub(
         "["
-        "\U0001F600-\U0001F64F"  # emoticons
-        "\U0001F300-\U0001F5FF"  # symbols & pictographs
-        "\U0001F680-\U0001F6FF"  # transport & map
-        "\U0001F1E0-\U0001F1FF"  # flags
-        "\U00002700-\U000027BF"  # dingbats
-        "\U0001F900-\U0001F9FF"  # supplemental symbols
-        "\U00002600-\U000026FF"  # misc symbols
-        "\U0001FA00-\U0001FA6F"  # chess / other
-        "\U0001FA70-\U0001FAFF"  # food / drink
-        "\U00002300-\U000023FF"  # misc technical
-        "\U0001F700-\U0001F77F"  # alchemical
+        "\U0001f600-\U0001f64f"  # emoticons
+        "\U0001f300-\U0001f5ff"  # symbols & pictographs
+        "\U0001f680-\U0001f6ff"  # transport & map
+        "\U0001f1e0-\U0001f1ff"  # flags
+        "\U00002700-\U000027bf"  # dingbats
+        "\U0001f900-\U0001f9ff"  # supplemental symbols
+        "\U00002600-\U000026ff"  # misc symbols
+        "\U0001fa00-\U0001fa6f"  # chess / other
+        "\U0001fa70-\U0001faff"  # food / drink
+        "\U00002300-\U000023ff"  # misc technical
+        "\U0001f700-\U0001f77f"  # alchemical
         "]+",
         " ",
         text,

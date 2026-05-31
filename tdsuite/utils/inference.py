@@ -1,23 +1,22 @@
 """Inference utilities for technical debt classification."""
 
-import json
 import os
-from typing import Dict, List, Optional, Union, Any, Tuple
-
-from tqdm import tqdm
+import warnings
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 import pandas as pd
 import torch
-from transformers import AutoModelForSequenceClassification, AutoTokenizer, PreTrainedModel, PreTrainedTokenizer
-import warnings
+from tqdm import tqdm
+from transformers import (
+    AutoModelForSequenceClassification,
+    AutoTokenizer,
+)
 
-from tdsuite.config.config import Config
-from tdsuite.data.dataset import TDProcessor
 from ..models.transformer import TransformerModel
 
 # Suppress FutureWarning from codecarbon
-warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.simplefilter(action="ignore", category=FutureWarning)
 
 
 class InferenceEngine:
@@ -135,14 +134,16 @@ class InferenceEngine:
         # Create batches with tqdm progress bar if enabled
         num_batches = (len(texts) + batch_size - 1) // batch_size
         batches = range(0, len(texts), batch_size)
-        
+
         # Use tqdm for progress tracking if enabled
         if self.show_progress:
-            batches = tqdm(batches, total=num_batches, desc="Processing batches", unit="batch")
+            batches = tqdm(
+                batches, total=num_batches, desc="Processing batches", unit="batch"
+            )
 
         # Process in batches
         for i in batches:
-            batch_texts = texts[i:i + batch_size]
+            batch_texts = texts[i : i + batch_size]
 
             # Tokenize batch
             inputs = self.tokenizer(
@@ -161,7 +162,9 @@ class InferenceEngine:
                 outputs = self.model(**inputs)
                 probabilities = torch.softmax(outputs.logits, dim=1)
                 predicted_classes = torch.argmax(probabilities, dim=1)
-                predicted_probs = probabilities[torch.arange(len(batch_texts)), predicted_classes]
+                predicted_probs = probabilities[
+                    torch.arange(len(batch_texts)), predicted_classes
+                ]
 
             # Convert to list of dictionaries
             for j, (text, pred_class, pred_prob) in enumerate(
@@ -217,12 +220,14 @@ class InferenceEngine:
         # Merge with original DataFrame to preserve labels if they exist
         if "label" in df.columns:
             results_df["label"] = df["label"]
-            
+
             # Map 0 to "non_" and 1 to the positive category
             unique_labels = df["label"].unique()
             if len(unique_labels) != 2:
-                raise ValueError("Binary classification requires exactly 2 unique labels")
-            
+                raise ValueError(
+                    "Binary classification requires exactly 2 unique labels"
+                )
+
             # Find the positive category (the one that doesn't start with "non_")
             positive_label = None
             non_label = None
@@ -231,13 +236,14 @@ class InferenceEngine:
                     non_label = label
                 else:
                     positive_label = label
-            
-            # If we couldn't identify the labels by prefix, use the first one as non_ and second as positive
+
+            # If prefix detection failed, use the first label as non_ and the
+            # second as positive
             if non_label is None or positive_label is None:
                 sorted_labels = sorted(unique_labels)
                 non_label = sorted_labels[0]
                 positive_label = sorted_labels[1]
-            
+
             # Create mapping: 0 -> non_, 1 -> positive
             label_map = {0: non_label, 1: positive_label}
             results_df["predicted_class"] = results_df["predicted_class"].map(label_map)
@@ -277,11 +283,11 @@ class EnsembleInferenceEngine:
 
         device = auto_select_device(device, backend="torch")
 
-        print(f"Initializing EnsembleInferenceEngine with:")
+        print("Initializing EnsembleInferenceEngine with:")
         print(f"  model_paths: {model_paths}")
         print(f"  model_names: {model_names}")
         print(f"  device: {device}")
-        
+
         self.model_paths = model_paths or []
         self.model_names = model_names or []
         self.max_length = max_length
@@ -290,12 +296,14 @@ class EnsembleInferenceEngine:
 
         # Validate inputs
         if not self.model_paths and not self.model_names:
-            raise ValueError("At least one of model_paths or model_names must be provided")
+            raise ValueError(
+                "At least one of model_paths or model_names must be provided"
+            )
 
         # Load models and tokenizers
         self.models = []
         self.tokenizers = []
-        
+
         # Load models from local paths
         for model_path in self.model_paths:
             try:
@@ -310,7 +318,7 @@ class EnsembleInferenceEngine:
             except Exception as e:
                 print(f"Error loading model from {model_path}: {str(e)}")
                 continue
-            
+
         # Load models from Hugging Face
         for model_name in self.model_names:
             try:
@@ -325,22 +333,28 @@ class EnsembleInferenceEngine:
             except Exception as e:
                 print(f"Error loading model {model_name}: {str(e)}")
                 continue
-            
+
         # Validate that we loaded at least one model
         if not self.models:
             raise ValueError("No models were successfully loaded")
-            
+
         # Set weights (default to equal weights if not provided)
         if weights is None:
             self.weights = [1.0 / len(self.models)] * len(self.models)
         else:
             if len(weights) != len(self.models):
-                raise ValueError(f"Number of weights ({len(weights)}) must match number of models ({len(self.models)})")
+                raise ValueError(
+                    f"Number of weights ({len(weights)}) must match "
+                    f"number of models ({len(self.models)})"
+                )
             # Normalize weights to sum to 1
             total_weight = sum(weights)
             self.weights = [w / total_weight for w in weights]
-        
-        print(f"Successfully loaded {len(self.models)} models with weights: {self.weights}")
+
+        print(
+            f"Successfully loaded {len(self.models)} models "
+            f"with weights: {self.weights}"
+        )
 
     def predict_single(self, text: str) -> Dict[str, Union[str, float, List[float]]]:
         """
@@ -355,10 +369,10 @@ class EnsembleInferenceEngine:
         """
         if not text:
             raise ValueError("Input text is empty")
-            
+
         # Get predictions from each model
         all_probabilities = []
-        
+
         for i, (model, tokenizer) in enumerate(zip(self.models, self.tokenizers)):
             try:
                 # Tokenize input
@@ -369,10 +383,10 @@ class EnsembleInferenceEngine:
                     max_length=self.max_length,
                     return_tensors="pt",
                 )
-                
+
                 # Move inputs to device
                 inputs = {k: v.to(self.device) for k, v in inputs.items()}
-                
+
                 # Get predictions
                 with torch.no_grad():
                     outputs = model(**inputs)
@@ -381,7 +395,7 @@ class EnsembleInferenceEngine:
             except Exception as e:
                 print(f"Error processing model {i+1}: {str(e)}")
                 continue
-        
+
         if not all_probabilities:
             # Handle the case where no models produced valid probabilities
             print("No valid predictions from any model. Returning default predictions.")
@@ -389,19 +403,19 @@ class EnsembleInferenceEngine:
             return {
                 "text": text,
                 "predicted_class": 0,
-                "predicted_probability": 1.0/num_classes,
-                "class_probabilities": [1.0/num_classes] * num_classes,
+                "predicted_probability": 1.0 / num_classes,
+                "class_probabilities": [1.0 / num_classes] * num_classes,
             }
-        
+
         # Weighted average of probabilities
         weighted_probs = np.zeros_like(all_probabilities[0])
         for i, probs in enumerate(all_probabilities):
             weighted_probs += probs * self.weights[i]
-        
+
         # Get predicted class and probability
         predicted_class = np.argmax(weighted_probs)
         predicted_prob = weighted_probs[predicted_class]
-        
+
         return {
             "text": text,
             "predicted_class": int(predicted_class),
@@ -424,33 +438,39 @@ class EnsembleInferenceEngine:
         """
         if not texts:
             raise ValueError("Input texts list is empty")
-            
+
         if not self.models or not self.tokenizers:
             raise ValueError("No models or tokenizers available in the ensemble")
-            
+
         print(f"Processing {len(texts)} texts with {len(self.models)} models")
-        
+
         # Process in batches
         predictions = []
         num_batches = (len(texts) + batch_size - 1) // batch_size
-        
+
         # Use tqdm for progress tracking if enabled
         if self.show_progress:
-            batches = tqdm(range(0, len(texts), batch_size), total=num_batches, desc="Processing batches")
+            batches = tqdm(
+                range(0, len(texts), batch_size),
+                total=num_batches,
+                desc="Processing batches",
+            )
         else:
             batches = range(0, len(texts), batch_size)
-        
+
         for i in batches:
-            batch_texts = texts[i:i + batch_size]
+            batch_texts = texts[i : i + batch_size]
             batch_predictions = self._process_batch(batch_texts)
             predictions.extend(batch_predictions)
-            
+
         return predictions
 
-    def _process_batch(self, texts: List[str]) -> List[Dict[str, Union[str, float, List[float]]]]:
+    def _process_batch(
+        self, texts: List[str]
+    ) -> List[Dict[str, Union[str, float, List[float]]]]:
         """Process a single batch of texts."""
         all_probabilities = []
-        
+
         for i, (model, tokenizer) in enumerate(zip(self.models, self.tokenizers)):
             try:
                 # Tokenize inputs
@@ -461,10 +481,10 @@ class EnsembleInferenceEngine:
                     max_length=self.max_length,
                     return_tensors="pt",
                 )
-                
+
                 # Move inputs to device
                 inputs = {k: v.to(self.device) for k, v in inputs.items()}
-                
+
                 # Get predictions
                 with torch.no_grad():
                     outputs = model(**inputs)
@@ -473,36 +493,37 @@ class EnsembleInferenceEngine:
             except Exception as e:
                 print(f"Error processing model {i+1}: {str(e)}")
                 continue
-        
+
         if not all_probabilities:
             # Handle the case where no models produced valid probabilities
             print("No valid predictions from any model. Returning default predictions.")
             num_classes = 2  # Default to binary classification
             predictions = []
             for text in texts:
-                predictions.append({
-                    "text": text,
-                    "predicted_class": 0,
-                    "predicted_probability": 1.0/num_classes,
-                    "class_probabilities": [1.0/num_classes] * num_classes,
-                })
+                predictions.append(
+                    {
+                        "text": text,
+                        "predicted_class": 0,
+                        "predicted_probability": 1.0 / num_classes,
+                        "class_probabilities": [1.0 / num_classes] * num_classes,
+                    }
+                )
             return predictions
-        
+
         # Stack and average probabilities across models
         num_examples = len(texts)
         num_classes = all_probabilities[0].shape[1]
         weighted_probabilities = np.zeros((num_examples, num_classes))
-        
+
         for i, probs in enumerate(all_probabilities):
             weighted_probabilities += probs * self.weights[i]
-        
+
         # Get predicted classes and probabilities
         predicted_classes = np.argmax(weighted_probabilities, axis=1)
-        predicted_probs = np.array([
-            weighted_probabilities[j, predicted_classes[j]] 
-            for j in range(len(texts))
-        ])
-        
+        predicted_probs = np.array(
+            [weighted_probabilities[j, predicted_classes[j]] for j in range(len(texts))]
+        )
+
         # Convert to list of dictionaries
         predictions = []
         for j, (text, pred_class, pred_prob) in enumerate(
@@ -516,7 +537,7 @@ class EnsembleInferenceEngine:
                     "class_probabilities": weighted_probabilities[j].tolist(),
                 }
             )
-        
+
         return predictions
 
     def predict_from_file(
@@ -527,7 +548,7 @@ class EnsembleInferenceEngine:
         batch_size: int = 32,
     ) -> pd.DataFrame:
         """
-        Read texts from a file, perform ensemble inference, and optionally save predictions.
+        Read texts from a file, run ensemble inference, optionally save results.
 
         Args:
             input_file: Path to input file (CSV or JSON)
@@ -558,12 +579,14 @@ class EnsembleInferenceEngine:
         # Merge with original DataFrame to preserve labels if they exist
         if "label" in df.columns:
             results_df["label"] = df["label"]
-            
+
             # Map 0 to "non_" and 1 to the positive category
             unique_labels = df["label"].unique()
             if len(unique_labels) != 2:
-                raise ValueError("Binary classification requires exactly 2 unique labels")
-            
+                raise ValueError(
+                    "Binary classification requires exactly 2 unique labels"
+                )
+
             # Find the positive category (the one that doesn't start with "non_")
             positive_label = None
             non_label = None
@@ -572,13 +595,14 @@ class EnsembleInferenceEngine:
                     non_label = label
                 else:
                     positive_label = label
-            
-            # If we couldn't identify the labels by prefix, use the first one as non_ and second as positive
+
+            # If prefix detection failed, use the first label as non_ and the
+            # second as positive
             if non_label is None or positive_label is None:
                 sorted_labels = sorted(unique_labels)
                 non_label = sorted_labels[0]
                 positive_label = sorted_labels[1]
-            
+
             # Create mapping: 0 -> non_, 1 -> positive
             label_map = {0: non_label, 1: positive_label}
             results_df["predicted_class"] = results_df["predicted_class"].map(label_map)
@@ -589,6 +613,3 @@ class EnsembleInferenceEngine:
             results_df.to_csv(output_file, index=False)
 
         return results_df
-
-
- 

@@ -1,3 +1,6 @@
-"""TD-Classifier Suite: An End-to-End System for Training and Applying Technical Debt Classifiers."""
+"""TD-Classifier Suite.
 
-__version__ = "0.1.0" 
+An end-to-end system for training and applying technical debt classifiers.
+"""
+
+__version__ = "0.1.1"

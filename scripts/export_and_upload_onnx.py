@@ -7,7 +7,8 @@ Reads HF_TOKEN from the .env file in the project root.
 Usage:
     python scripts/export_and_upload_onnx.py
     python scripts/export_and_upload_onnx.py --dry-run          # list models only
-    python scripts/export_and_upload_onnx.py --model karths/binary_classification_train_TD
+    python scripts/export_and_upload_onnx.py \\
+        --model karths/binary_classification_train_TD
     python scripts/export_and_upload_onnx.py --opset 17 --max-length 256
 
 Requirements:
@@ -32,10 +33,13 @@ os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def load_env_token(env_path: str = None) -> str:
     """Read HF_TOKEN from the .env file (key=value format)."""
     if env_path is None:
-        env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+        env_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"
+        )
 
     if not os.path.exists(env_path):
         raise FileNotFoundError(f".env file not found: {env_path}")
@@ -111,7 +115,9 @@ def onnx_is_fixed(api, repo_id: str, min_mb: float = 10.0, retries: int = 3) -> 
     return False
 
 
-def export_model_to_onnx(model_id: str, output_path: str, max_length: int, opset: int, token: str = None):
+def export_model_to_onnx(
+    model_id: str, output_path: str, max_length: int, opset: int, token: str = None
+):
     """Download a HF model and export it to a single self-contained ONNX file.
 
     Uses the shared TorchDynamo-based exporter (transformers>=5 compatible) and
@@ -131,7 +137,9 @@ def export_model_to_onnx(model_id: str, output_path: str, max_length: int, opset
     return tokenizer
 
 
-def upload_onnx_to_repo(api, repo_id: str, onnx_path: str, tokenizer, commit_msg: str, max_retries: int = 4):
+def upload_onnx_to_repo(
+    api, repo_id: str, onnx_path: str, tokenizer, commit_msg: str, max_retries: int = 4
+):
     """Upload model.onnx (and refresh tokenizer files) to the HF repo.
 
     Retries on transient network failures (e.g. connection resets) with
@@ -162,14 +170,23 @@ def upload_onnx_to_repo(api, repo_id: str, onnx_path: str, tokenizer, commit_msg
                 pass
 
             try:
-                print(f"  Uploading model.onnx to {repo_id} (attempt {attempt}/{max_retries}) ...")
+                print(
+                    f"  Uploading model.onnx to {repo_id} "
+                    f"(attempt {attempt}/{max_retries}) ..."
+                )
                 api.upload_folder(
                     folder_path=tmp,
                     repo_id=repo_id,
                     repo_type="model",
                     commit_message=commit_msg,
-                    # Only upload onnx + tokenizer files; leave the rest of the repo untouched
-                    allow_patterns=["model.onnx", "tokenizer*", "special_tokens_map.json", "vocab*", "merges.txt"],
+                    # Only upload onnx + tokenizer files; leave the rest as-is
+                    allow_patterns=[
+                        "model.onnx",
+                        "tokenizer*",
+                        "special_tokens_map.json",
+                        "vocab*",
+                        "merges.txt",
+                    ],
                 )
                 print(f"  Uploaded -> https://huggingface.co/{repo_id}")
                 return
@@ -181,16 +198,22 @@ def upload_onnx_to_repo(api, repo_id: str, onnx_path: str, tokenizer, commit_msg
                     print(f"  Retrying in {wait}s ...")
                     time.sleep(wait)
 
-        raise RuntimeError(f"Upload to {repo_id} failed after {max_retries} attempts: {last_err}")
+        raise RuntimeError(
+            f"Upload to {repo_id} failed after {max_retries} attempts: {last_err}"
+        )
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Export all binary_classification_train_* models to ONNX and upload to HF Hub"
+        description=(
+            "Export all binary_classification_train_* models to ONNX "
+            "and upload to HF Hub"
+        )
     )
     parser.add_argument(
         "--model",
@@ -203,14 +226,18 @@ def main():
         default=None,
         help=(
             "Model ID prefix to filter. Can be specified multiple times. "
-            "Default: both karths/binary_classification_train_ and karths/modernbertbase-binary-10IQR-"
+            "Default: both karths/binary_classification_train_ and "
+            "karths/modernbertbase-binary-10IQR-"
         ),
     )
     parser.add_argument(
         "--opset", type=int, default=14, help="ONNX opset version (default: 14)"
     )
     parser.add_argument(
-        "--max-length", type=int, default=512, help="Sequence length for export dummy input (default: 512)"
+        "--max-length",
+        type=int,
+        default=512,
+        help="Sequence length for export dummy input (default: 512)",
     )
     parser.add_argument(
         "--skip-existing",
@@ -249,6 +276,7 @@ def main():
     token = load_env_token(args.env)
 
     from huggingface_hub import HfApi
+
     api = HfApi(token=token)
 
     # Determine model list
@@ -278,9 +306,15 @@ def main():
                 skipped.append(model_id)
                 continue
             cmd = [
-                sys.executable, os.path.abspath(__file__),
-                "--model", model_id, "--no-skip-existing",
-                "--opset", str(args.opset), "--max-length", str(args.max_length),
+                sys.executable,
+                os.path.abspath(__file__),
+                "--model",
+                model_id,
+                "--no-skip-existing",
+                "--opset",
+                str(args.opset),
+                "--max-length",
+                str(args.max_length),
             ]
             if args.env:
                 cmd += ["--env", args.env]
@@ -307,7 +341,10 @@ def main():
             print(f"Processing: {model_id}")
 
             if args.skip_existing and onnx_is_fixed(api, model_id):
-                print("  model.onnx already fixed — skipping (use --no-skip-existing to force)")
+                print(
+                    "  model.onnx already fixed — skipping "
+                    "(use --no-skip-existing to force)"
+                )
                 results["skipped"].append(model_id)
                 continue
 

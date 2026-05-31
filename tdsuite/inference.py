@@ -12,13 +12,11 @@ from datetime import datetime
 # Disable oneDNN warning before any TF import
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
-import pandas as pd
-
-from tdsuite.utils.onnx_inference import (
+from tdsuite.cli import get_inference_parser  # noqa: E402
+from tdsuite.utils.onnx_inference import (  # noqa: E402
     OnnxEnsembleInferenceEngine,
     OnnxInferenceEngine,
 )
-from tdsuite.cli import get_inference_parser
 
 
 def parse_args():
@@ -71,7 +69,7 @@ def _resolve_device(args, use_torch: bool) -> str:
 def _build_torch_engine(args, device: str):
     """Build an InferenceEngine or EnsembleInferenceEngine (requires torch)."""
     try:
-        from tdsuite.utils.inference import InferenceEngine, EnsembleInferenceEngine
+        from tdsuite.utils.inference import EnsembleInferenceEngine, InferenceEngine
     except ImportError as exc:
         raise ImportError(
             "PyTorch-based inference requires torch and transformers.\n"
@@ -83,7 +81,8 @@ def _build_torch_engine(args, device: str):
             num_models = max(len(args.model_paths or []), len(args.model_names or []))
             if len(args.weights) != num_models:
                 raise ValueError(
-                    f"Number of weights ({len(args.weights)}) must match number of models ({num_models})"
+                    f"Number of weights ({len(args.weights)}) must match "
+                    f"number of models ({num_models})"
                 )
         return EnsembleInferenceEngine(
             model_paths=args.model_paths,
@@ -107,7 +106,8 @@ def _build_onnx_ensemble_engine(args, device: str) -> OnnxEnsembleInferenceEngin
         num_models = max(len(args.model_paths or []), len(args.model_names or []))
         if len(args.weights) != num_models:
             raise ValueError(
-                f"Number of weights ({len(args.weights)}) must match number of models ({num_models})"
+                f"Number of weights ({len(args.weights)}) must match "
+                f"number of models ({num_models})"
             )
     return OnnxEnsembleInferenceEngine(
         model_paths=args.model_paths,
@@ -136,7 +136,9 @@ def _build_onnx_engine(args, device: str) -> OnnxInferenceEngine:
     source = args.model_name or args.model_path
     if source:
         # If source is a local directory that contains model.onnx, use it directly
-        local_onnx = os.path.join(source, "model.onnx") if os.path.isdir(source) else None
+        local_onnx = (
+            os.path.join(source, "model.onnx") if os.path.isdir(source) else None
+        )
         if local_onnx and os.path.exists(local_onnx):
             return OnnxInferenceEngine(
                 onnx_path=local_onnx,
@@ -253,7 +255,9 @@ def main():
         else:
             if args.output_file is None:
                 input_filename = os.path.basename(args.input_file)
-                args.output_file = os.path.join(results_dir, f"predictions_{input_filename}")
+                args.output_file = os.path.join(
+                    results_dir, f"predictions_{input_filename}"
+                )
 
             print(f"Input  : {args.input_file}")
             print(f"Output : {args.output_file}")
