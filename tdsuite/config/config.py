@@ -3,7 +3,7 @@
 import json
 import os
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -43,14 +43,14 @@ class ModelConfig:
                 json.dump(self.to_dict(), f, indent=4)
 
     @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]):
+    def from_dict(cls, config_dict: dict[str, Any]):
         """Create a configuration from a dictionary."""
         return cls(**config_dict)
 
     @classmethod
     def load(cls, config_path: str):
         """Load a configuration from a JSON file."""
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             config_dict = json.load(f)
         return cls.from_dict(config_dict)
 
@@ -75,7 +75,7 @@ class TrainingConfig:
     logging_dir: Optional[str] = None
     logging_steps: int = 100
     dataloader_num_workers: int = 8
-    report_to: List[str] = field(default_factory=lambda: ["none"])
+    report_to: list[str] = field(default_factory=lambda: ["none"])
     load_best_model_at_end: bool = True
     metric_for_best_model: str = "eval_loss"
     greater_is_better: bool = False
@@ -102,14 +102,14 @@ class TrainingConfig:
                 json.dump(self.to_dict(), f, indent=4)
 
     @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]):
+    def from_dict(cls, config_dict: dict[str, Any]):
         """Create a configuration from a dictionary."""
         return cls(**config_dict)
 
     @classmethod
     def load(cls, config_path: str):
         """Load a configuration from a JSON file."""
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             config_dict = json.load(f)
         return cls.from_dict(config_dict)
 
@@ -168,14 +168,14 @@ class DataConfig:
                 json.dump(self.to_dict(), f, indent=4)
 
     @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]):
+    def from_dict(cls, config_dict: dict[str, Any]):
         """Create a configuration from a dictionary."""
         return cls(**config_dict)
 
     @classmethod
     def load(cls, config_path: str):
         """Load a configuration from a JSON file."""
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             config_dict = json.load(f)
         return cls.from_dict(config_dict)
 
@@ -210,14 +210,14 @@ class InferenceConfig:
                 json.dump(self.to_dict(), f, indent=4)
 
     @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]):
+    def from_dict(cls, config_dict: dict[str, Any]):
         """Create a configuration from a dictionary."""
         return cls(**config_dict)
 
     @classmethod
     def load(cls, config_path: str):
         """Load a configuration from a JSON file."""
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             config_dict = json.load(f)
         return cls.from_dict(config_dict)
 
@@ -231,7 +231,7 @@ class Config:
     data: DataConfig = field(default_factory=DataConfig)
     inference: InferenceConfig = field(default_factory=InferenceConfig)
     category: Optional[str] = None
-    categories: Optional[List[str]] = None
+    categories: Optional[list[str]] = None
 
     def to_dict(self):
         """Convert to dictionary."""
@@ -260,7 +260,7 @@ class Config:
                 json.dump(self.to_dict(), f, indent=4)
 
     @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]):
+    def from_dict(cls, config_dict: dict[str, Any]):
         """Create a configuration from a dictionary."""
         return cls(
             model=ModelConfig.from_dict(config_dict.get("model", {})),
@@ -274,6 +274,6 @@ class Config:
     @classmethod
     def load(cls, config_path: str):
         """Load a configuration from a JSON file."""
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             config_dict = json.load(f)
         return cls.from_dict(config_dict)

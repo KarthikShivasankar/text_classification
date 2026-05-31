@@ -2,7 +2,7 @@
 
 import os
 import warnings
-from typing import Dict, List, Optional, Union
+from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -76,7 +76,7 @@ class InferenceEngine:
         model.eval()
         return model
 
-    def predict_single(self, text: str) -> Dict[str, Union[str, float, List[float]]]:
+    def predict_single(self, text: str) -> dict[str, Union[str, float, list[float]]]:
         """
         Predict the class for a single text.
 
@@ -117,8 +117,8 @@ class InferenceEngine:
         }
 
     def predict_batch(
-        self, texts: List[str], batch_size: int = 32
-    ) -> List[Dict[str, Union[str, float, List[float]]]]:
+        self, texts: list[str], batch_size: int = 32
+    ) -> list[dict[str, Union[str, float, list[float]]]]:
         """
         Predict classes for a batch of texts.
 
@@ -261,11 +261,11 @@ class EnsembleInferenceEngine:
 
     def __init__(
         self,
-        model_paths: Optional[List[str]] = None,
-        model_names: Optional[List[str]] = None,
+        model_paths: Optional[list[str]] = None,
+        model_names: Optional[list[str]] = None,
         max_length: int = 512,
         device: Optional[str] = None,
-        weights: Optional[List[float]] = None,
+        weights: Optional[list[float]] = None,
     ):
         """
         Initialize the ensemble inference engine.
@@ -356,7 +356,7 @@ class EnsembleInferenceEngine:
             f"with weights: {self.weights}"
         )
 
-    def predict_single(self, text: str) -> Dict[str, Union[str, float, List[float]]]:
+    def predict_single(self, text: str) -> dict[str, Union[str, float, list[float]]]:
         """
         Predict the class for a single text using ensemble of models.
 
@@ -424,8 +424,8 @@ class EnsembleInferenceEngine:
         }
 
     def predict_batch(
-        self, texts: List[str], batch_size: int = 32
-    ) -> List[Dict[str, Union[str, float, List[float]]]]:
+        self, texts: list[str], batch_size: int = 32
+    ) -> list[dict[str, Union[str, float, list[float]]]]:
         """
         Predict classes for a batch of texts using an ensemble of models.
 
@@ -466,8 +466,8 @@ class EnsembleInferenceEngine:
         return predictions
 
     def _process_batch(
-        self, texts: List[str]
-    ) -> List[Dict[str, Union[str, float, List[float]]]]:
+        self, texts: list[str]
+    ) -> list[dict[str, Union[str, float, list[float]]]]:
         """Process a single batch of texts."""
         all_probabilities = []
 

@@ -24,7 +24,7 @@ uv venv && uv sync           # CPU inference (ONNX) — no torch required
 uv pip install -e ".[gpu]"   # + GPU inference (onnxruntime-gpu + torch CUDA 12.4)
 uv pip install -e ".[train]" # + full training stack (torch, codecarbon, evaluate…)
 uv pip install -e ".[onnx]"    # + onnx/onnxscript for exporting custom models
-uv pip install -e ".[dev]"     # + black, isort, flake8
+uv pip install -e ".[dev]"     # + ruff, black, isort, flake8
 uv pip install -r test-requirements.txt  # + pytest, pytest-cov
 # optimum (NOTE: optimum 2.x requires transformers<5 — conflicts with current env)
 # The torch.onnx.export fallback works without optimum; only install if needed.
@@ -94,11 +94,15 @@ python app.py   # Gradio UI at http://localhost:7077 (requires gradio — not in
 
 ### Code Quality
 ```bash
+ruff check tdsuite/ scripts/   # primary linter + import sort (config in pyproject.toml)
+ruff check --fix tdsuite/ scripts/
 black tdsuite/ scripts/
 isort tdsuite/ scripts/
-flake8 tdsuite/ scripts/   # config in .flake8
-pytest --cov=tdsuite       # config in pyproject.toml [tool.pytest.ini_options]
+flake8 tdsuite/ scripts/       # legacy linter, kept green (config in .flake8)
+pytest --cov=tdsuite           # config in pyproject.toml [tool.pytest.ini_options]
 ```
+
+CI (`.github/workflows/ci.yml`) runs ruff/black/isort + pytest on Python 3.9–3.12 and a build+twine-check on every push/PR to `main`. Releases publish to PyPI via Trusted Publishing (`.github/workflows/release.yml`) when a GitHub Release is published.
 
 ## Architecture
 
@@ -152,4 +156,4 @@ pytest --cov=tdsuite       # config in pyproject.toml [tool.pytest.ini_options]
 - `pyproject.toml` is the single source of truth for packaging, tool config (black, isort, pytest), and optional dependency groups (`gpu`, `train`, `onnx`, `optimum`, `dev`, `test`). There is no `setup.py` — packaging is fully PEP 621.
 - **Version is single-sourced**: `pyproject.toml` declares `dynamic = ["version"]` and reads it from `tdsuite.__version__` (`tdsuite/__init__.py`). Bump the version in `__init__.py` only.
 - **Core install stays torch/datasets-free**: modules in the default import path (`tdsuite.inference`, `tdsuite.utils.onnx_inference`, `tdsuite.split_data`) must not import `torch`, `datasets`, `codecarbon`, etc. at top level. The `datasets` import in `data_utils.py`/`data_splitter.py` and the PyTorch engines in `utils/inference.py` are lazy-loaded (via in-function imports and `__getattr__` in `tdsuite/utils/__init__.py` and `tdsuite/data/__init__.py`), so `pip install tdsuite` (ONNX-only) imports cleanly.
-- **Lint/format**: run `black tdsuite/ scripts/`, `isort tdsuite/ scripts/`, `flake8 tdsuite/ scripts/` — the tree is kept clean (intentional pre-import statements are marked `# noqa: E402`).
+- **Lint/format**: ruff is the primary linter/import-sorter (`ruff check tdsuite/ scripts/`); `black` and `flake8` are also kept green. Intentional pre-import statements are marked `# noqa: E402`. Config lives in `pyproject.toml` (`[tool.ruff]`, `[tool.black]`, `[tool.isort]`) and `.flake8`.

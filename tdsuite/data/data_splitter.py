@@ -2,7 +2,7 @@
 
 import json
 import os
-from typing import Optional, Tuple
+from typing import Optional
 
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -69,7 +69,9 @@ class DataSplitter:
                     df = dataset.to_pandas()
                 return df
             except Exception as e:
-                raise ValueError(f"Failed to load Hugging Face dataset: {str(e)}")
+                raise ValueError(
+                    f"Failed to load Hugging Face dataset: {str(e)}"
+                ) from e
 
         # Check if the file exists
         if not os.path.exists(self.data_file):
@@ -147,7 +149,7 @@ class DataSplitter:
 
     def split_and_save(
         self,
-    ) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[pd.DataFrame]]:
+    ) -> tuple[pd.DataFrame, pd.DataFrame, Optional[pd.DataFrame]]:
         """
         Split the data into training and test sets, and extract top repositories.
         First identifies the top repo with most positive samples, extracts all

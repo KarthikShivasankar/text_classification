@@ -58,7 +58,7 @@ def load_dataset_from_huggingface(
         dataset = hf_load_dataset(dataset_name, split=split)
         return dataset.to_pandas()
     except Exception as e:
-        raise ValueError(f"Failed to load Hugging Face dataset: {str(e)}")
+        raise ValueError(f"Failed to load Hugging Face dataset: {str(e)}") from e
 
 
 def load_dataset(data_source: str, split: str = "train") -> pd.DataFrame:

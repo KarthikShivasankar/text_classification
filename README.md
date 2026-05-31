@@ -38,6 +38,12 @@ A suite for detecting and classifying **technical debt** in software repositorie
 - [Output Files](#output-files)
 - [Project Structure](#project-structure)
 - [Citation](#citation)
+- [Development & Maintenance](#development--maintenance)
+  - [Dev environment setup](#dev-environment-setup)
+  - [Linting & formatting (ruff)](#linting--formatting-ruff)
+  - [Continuous Integration](#continuous-integration)
+  - [Releasing to PyPI (Trusted Publishing)](#releasing-to-pypi-trusted-publishing)
+  - [Updating the documentation](#updating-the-documentation)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -142,9 +148,12 @@ tdsuite-inference --model_name karths/binary_classification_train_TD \
 
 ### Publishing to PyPI
 
+Releases are automated via **Trusted Publishing** — see [Releasing to PyPI](#releasing-to-pypi-trusted-publishing). For a manual one-off upload:
+
 ```bash
 uv pip install build twine
 python -m build
+twine check dist/*
 twine upload dist/*
 ```
 
@@ -1169,13 +1178,119 @@ If you use TD-Suite in your research, please cite:
 
 ---
 
-## Contributing
+## Development & Maintenance
 
-Contributions are welcome. Please open a pull request with a clear description of the change and ensure `flake8` passes:
+This section is for contributors and maintainers of the `tdsuite` package itself. See also [`AGENTS.md`](AGENTS.md) (quick reference for AI agents/contributors) and [`CLAUDE.md`](CLAUDE.md) (architecture deep-dive).
+
+### Dev environment setup
 
 ```bash
-flake8 tdsuite/ scripts/
+git clone https://github.com/KarthikShivasankar/text_classification
+cd text_classification
+
+# Preferred: uv
+uv venv
+uv pip install -e ".[dev,test]"        # ruff, black, isort, flake8, pytest
+uv pip install -e ".[train,onnx]"      # optional: exercise the torch + ONNX-export paths
+
+# pip fallback
+pip install -e ".[dev,test]"
 ```
+
+> The default install is intentionally **torch-free** (ONNX only). When editing modules on
+> the default import path (`tdsuite/inference.py`, `tdsuite/utils/onnx_inference.py`,
+> `tdsuite/split_data.py`, and their imports), **do not add top-level `import torch` or
+> `from datasets import …`** — import them lazily inside functions or behind `__getattr__`
+> (see `tdsuite/utils/__init__.py` / `tdsuite/data/__init__.py`). This keeps
+> `pip install tdsuite` importable without the heavy extras.
+
+### Linting & formatting (ruff)
+
+[Ruff](https://docs.astral.sh/ruff/) is the primary linter and import sorter (config in
+`pyproject.toml` under `[tool.ruff]`). `black` (formatting) and `flake8` are also kept green.
+
+```bash
+# Check (what CI runs)
+ruff check tdsuite/ scripts/
+black --check tdsuite/ scripts/
+isort --check-only tdsuite/ scripts/
+flake8 tdsuite/ scripts/
+
+# Auto-fix
+ruff check --fix tdsuite/ scripts/
+black tdsuite/ scripts/
+isort tdsuite/ scripts/
+
+# Run the test suite (235 tests, fully offline — no GPU or network)
+pytest
+```
+
+### Continuous Integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request to `main`:
+
+| Job | What it does |
+|-----|--------------|
+| **Lint & format** | `ruff check`, `black --check`, `isort --check-only` |
+| **Tests** | `pytest` on a matrix of Python **3.9, 3.10, 3.11, 3.12** (CPU-only torch + `datasets`) |
+| **Build & twine check** | `python -m build` + `twine check dist/*`, uploads the artifacts |
+
+Keep all jobs green — PRs should not merge with failing CI.
+
+### Releasing to PyPI (Trusted Publishing)
+
+Publishing is automated via **PyPI [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (OIDC)** — no API token is stored in the repo. The release workflow is [`.github/workflows/release.yml`](.github/workflows/release.yml).
+
+**One-time setup** (PyPI → project `tdsuite` → *Settings* → *Publishing*): add a GitHub publisher with
+owner `KarthikShivasankar`, repository `text_classification`, workflow `release.yml`, environment `pypi`.
+
+**Each release:**
+
+```bash
+# 1. Bump the single source of truth for the version
+#    tdsuite/__init__.py  ->  __version__ = "X.Y.Z"
+# 2. Update docs/changelog as needed, commit, and push to main
+git commit -am "build: release vX.Y.Z"
+git push origin main
+
+# 3. Tag and push the tag
+git tag vX.Y.Z
+git push origin vX.Y.Z
+
+# 4. Create a GitHub Release for that tag (UI or gh):
+gh release create vX.Y.Z --generate-notes
+#    -> release.yml builds, runs `twine check`, and publishes to PyPI via OIDC.
+```
+
+> The version lives only in `tdsuite/__init__.py` (`pyproject.toml` uses `dynamic = ["version"]`).
+> **PyPI versions are immutable** — a version can never be re-uploaded, so always bump before releasing.
+
+### Updating the documentation
+
+Documentation is plain Markdown — no build step or site generator.
+
+| File | Purpose | Update when… |
+|------|---------|--------------|
+| `README.md` | User-facing docs (install, usage, CLI reference, CI/release) | CLI flags, install steps, models, or workflows change |
+| `AGENTS.md` | Quick reference for agents/contributors (setup, validate, conventions) | dev commands, conventions, or layout change |
+| `CLAUDE.md` | Architecture & design-decision deep-dive | package structure or key design decisions change |
+| `HF_UPLOAD_README.md` | Hugging Face model upload guide | `tdsuite/upload_to_hf.py` behavior changes |
+
+Conventions when editing docs:
+
+- Keep the three CLI references (README "Full CLI Reference", help strings in `tdsuite/cli.py`, and examples) in sync.
+- The **test count** in the README "Testing" section should match `pytest` output — re-run `pytest` and update it after adding/removing tests.
+- Use fenced code blocks with language tags; keep tables GitHub-flavored-Markdown compatible.
+- After editing, sanity-check links/anchors render on GitHub (the Table of Contents anchors are lowercase, spaces→`-`, punctuation stripped).
+
+## Contributing
+
+Contributions are welcome. Before opening a pull request:
+
+1. Run the full local check suite (lint + format + tests) shown in [Linting & formatting](#linting--formatting-ruff) — CI runs the same.
+2. Add or update tests under `tests/` for any behavior change.
+3. Update the relevant docs (see [Updating the documentation](#updating-the-documentation)).
+4. Write a clear PR description and use a Conventional-Commits-style title (`feat:`, `fix:`, `docs:`, `build:`, `style:`…).
 
 ## License
 

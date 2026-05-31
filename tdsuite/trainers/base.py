@@ -669,7 +669,7 @@ class BaseTrainer:
         """
         # Extract metrics from fold results
         metrics = {}
-        for fold_idx, fold_result in enumerate(fold_results):
+        for _fold_idx, fold_result in enumerate(fold_results):
             for metric_name, metric_value in fold_result.items():
                 if metric_name not in metrics:
                     metrics[metric_name] = []

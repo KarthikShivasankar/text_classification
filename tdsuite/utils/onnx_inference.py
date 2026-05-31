@@ -7,7 +7,7 @@ when the ONNX CUDAExecutionProvider is available *and* a GPU exposes more than
 
 import os
 import sys
-from typing import Dict, List, Optional, Union
+from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -464,7 +464,7 @@ class OnnxInferenceEngine:
 
         return AutoTokenizer.from_pretrained(tokenizer_path)
 
-    def _tokenize(self, texts: Union[str, List[str]]) -> Dict[str, np.ndarray]:
+    def _tokenize(self, texts: Union[str, list[str]]) -> dict[str, np.ndarray]:
         if isinstance(texts, str):
             texts = [texts]
         enc = self.tokenizer(
@@ -476,7 +476,7 @@ class OnnxInferenceEngine:
         )
         return {k: enc[k] for k in self._input_names if k in enc}
 
-    def _run_session(self, inputs: Dict[str, np.ndarray]) -> np.ndarray:
+    def _run_session(self, inputs: dict[str, np.ndarray]) -> np.ndarray:
         logits = self.session.run(None, inputs)[0]  # (batch, num_labels)
         exp_logits = np.exp(logits - logits.max(axis=1, keepdims=True))
         return exp_logits / exp_logits.sum(axis=1, keepdims=True)
@@ -485,7 +485,7 @@ class OnnxInferenceEngine:
     # Public API (drop-in for InferenceEngine)
     # ------------------------------------------------------------------
 
-    def predict_single(self, text: str) -> Dict[str, Union[str, float, List[float]]]:
+    def predict_single(self, text: str) -> dict[str, Union[str, float, list[float]]]:
         """Predict the class for a single text string."""
         inputs = self._tokenize(text)
         probs = self._run_session(inputs)[0]
@@ -498,8 +498,8 @@ class OnnxInferenceEngine:
         }
 
     def predict_batch(
-        self, texts: List[str], batch_size: int = 32
-    ) -> List[Dict[str, Union[str, float, List[float]]]]:
+        self, texts: list[str], batch_size: int = 32
+    ) -> list[dict[str, Union[str, float, list[float]]]]:
         """Predict classes for a list of texts."""
         predictions = []
         num_batches = (len(texts) + batch_size - 1) // batch_size
@@ -637,12 +637,12 @@ class OnnxEnsembleInferenceEngine:
 
     def __init__(
         self,
-        model_paths: Optional[List[str]] = None,
-        model_names: Optional[List[str]] = None,
+        model_paths: Optional[list[str]] = None,
+        model_names: Optional[list[str]] = None,
         max_length: int = 512,
         show_progress: bool = True,
         device: Optional[str] = None,
-        weights: Optional[List[float]] = None,
+        weights: Optional[list[float]] = None,
         token: Optional[str] = None,
     ):
         """
@@ -670,7 +670,7 @@ class OnnxEnsembleInferenceEngine:
 
         # Build one ONNX engine per model. Member progress bars are suppressed
         # so only the ensemble-level bar is shown.
-        self.engines: List[OnnxInferenceEngine] = []
+        self.engines: list[OnnxInferenceEngine] = []
         for source in [*self.model_paths, *self.model_names]:
             engine = _build_onnx_member(
                 source,
@@ -700,7 +700,7 @@ class OnnxEnsembleInferenceEngine:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _weighted_probabilities(self, texts: List[str]) -> np.ndarray:
+    def _weighted_probabilities(self, texts: list[str]) -> np.ndarray:
         """Return the weighted-mean softmax probabilities for a list of texts.
 
         Shape: ``(len(texts), num_classes)``.
@@ -718,7 +718,7 @@ class OnnxEnsembleInferenceEngine:
     # Public API (drop-in for EnsembleInferenceEngine / OnnxInferenceEngine)
     # ------------------------------------------------------------------
 
-    def predict_single(self, text: str) -> Dict[str, Union[str, float, List[float]]]:
+    def predict_single(self, text: str) -> dict[str, Union[str, float, list[float]]]:
         """Predict the class for a single text using the ONNX ensemble."""
         probs = self._weighted_probabilities([text])[0]
         predicted_class = int(np.argmax(probs))
@@ -730,8 +730,8 @@ class OnnxEnsembleInferenceEngine:
         }
 
     def predict_batch(
-        self, texts: List[str], batch_size: int = 32
-    ) -> List[Dict[str, Union[str, float, List[float]]]]:
+        self, texts: list[str], batch_size: int = 32
+    ) -> list[dict[str, Union[str, float, list[float]]]]:
         """Predict classes for a list of texts using the ONNX ensemble."""
         predictions = []
         num_batches = (len(texts) + batch_size - 1) // batch_size

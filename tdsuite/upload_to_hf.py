@@ -6,7 +6,7 @@ Script for uploading trained technical debt classification models to Hugging Fac
 import argparse
 import json
 import os
-from typing import Dict, Optional
+from typing import Optional
 
 from huggingface_hub import HfApi, create_repo
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
@@ -74,11 +74,11 @@ def parse_args():
     return parser.parse_args()
 
 
-def read_config_file(model_path: str, file_name: str) -> Optional[Dict]:
+def read_config_file(model_path: str, file_name: str) -> Optional[dict]:
     """Read a configuration file from the model directory."""
     config_path = os.path.join(model_path, file_name)
     if os.path.exists(config_path):
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             return json.load(f)
     return None
 
@@ -229,7 +229,7 @@ def main():
         AutoModelForSequenceClassification.from_pretrained(args.model_path)
         print("✅ Model and tokenizer loaded successfully")
     except Exception as e:
-        raise ValueError(f"Failed to load model: {str(e)}")
+        raise ValueError(f"Failed to load model: {str(e)}") from e
 
     # Generate model card if requested
     if args.generate_card:

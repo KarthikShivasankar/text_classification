@@ -1,7 +1,7 @@
 """Transformer model implementation for technical debt classification."""
 
 import os
-from typing import List, Union
+from typing import Union
 
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
@@ -83,7 +83,7 @@ class TransformerModel(BaseModel):
 
         return model, tokenizer
 
-    def predict(self, texts: Union[str, List[str]], batch_size: int = 32):
+    def predict(self, texts: Union[str, list[str]], batch_size: int = 32):
         """
         Make predictions on the input texts.
 
@@ -142,7 +142,7 @@ class TransformerModel(BaseModel):
         if os.path.exists(config_path):
             import json
 
-            with open(config_path, "r") as f:
+            with open(config_path) as f:
                 config = json.load(f)
 
             model_name = config.get("model_name", checkpoint_path)
